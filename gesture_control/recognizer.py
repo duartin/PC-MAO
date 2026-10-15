@@ -63,6 +63,31 @@ class HandGestureRecognizer:
         # tip approaches it. This keeps the zoom gesture distinct from a fist.
         return gap / palm_width < 0.60 and index_reach / palm_width > 0.55
 
+    @staticmethod
+    def _middle_pinch_pose(points: Sequence, extended, extended_down) -> bool:
+        palm_width = math.hypot(
+            points[INDEX_MCP].x - points[PINKY_MCP].x,
+            points[INDEX_MCP].y - points[PINKY_MCP].y,
+        )
+        if palm_width < 0.025 or not extended[0]:
+            return False
+        gap = math.hypot(
+            points[THUMB_TIP].x - points[MIDDLE_TIP].x,
+            points[THUMB_TIP].y - points[MIDDLE_TIP].y,
+        )
+        index_reach = math.hypot(
+            points[INDEX_TIP].x - points[INDEX_MCP].x,
+            points[INDEX_TIP].y - points[INDEX_MCP].y,
+        )
+        middle_curled = not extended[1] and not extended_down[1]
+        ring_and_pinky_curled = not any(extended[2:]) and not any(extended_down[2:])
+        return (
+            gap / palm_width < 0.32
+            and index_reach / palm_width > 0.55
+            and middle_curled
+            and ring_and_pinky_curled
+        )
+
     def recognize(self, points: Sequence) -> Optional[Gesture]:
         """Return the best known pose, or None when evidence is insufficient."""
         if len(points) < 21:
@@ -97,6 +122,8 @@ class HandGestureRecognizer:
             return Gesture("Dois dedos para baixo", "scroll_down", 0.88)
         if self._pinch_pose(points):
             return Gesture("Pinça", "pinch", 0.90)
+        if self._middle_pinch_pose(points, extended, extended_down):
+            return Gesture("Pinça polegar-médio", "click_drag", 0.90)
         if (
             extended[0]
             and not any(extended[1:])

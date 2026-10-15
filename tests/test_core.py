@@ -100,6 +100,7 @@ def test_cursor_mapping_uses_safe_inner_area_and_clamps_edges():
     assert controller.map_to_screen(0.12, 0.12, 1000, 800) == (0, 0)
     assert controller.map_to_screen(0.88, 0.88, 1000, 800) == (999, 799)
     assert controller.map_to_screen(0.5, 0.5, 1000, 800) == (500, 400)
+    assert controller.map_to_screen(0.10, 0.10, 1000, 800, margin=0.10) == (0, 0)
 
 
 def test_cursor_moves_without_real_execution_in_dry_run():
@@ -107,3 +108,24 @@ def test_cursor_moves_without_real_execution_in_dry_run():
     result = controller.move_cursor(0.5, 0.5)
     assert "Modo de teste" in result
     assert "0.50" in result
+
+
+def test_thumb_middle_pinch_has_separate_click_drag_action():
+    points = [P(x=0.5, y=0.5) for _ in range(21)]
+    points[5] = P(x=0.40, y=0.55)
+    points[17] = P(x=0.60, y=0.55)
+    points[8] = P(x=0.40, y=0.30)
+    points[6] = P(x=0.40, y=0.40)
+    points[12] = P(x=0.50, y=0.60)
+    points[10] = P(x=0.48, y=0.52)
+    points[9] = P(x=0.48, y=0.55)
+    points[4] = P(x=0.50, y=0.60)
+    gesture = HandGestureRecognizer().recognize(points)
+    assert gesture.action == "click_drag"
+
+
+def test_mouse_click_and_drag_buttons_are_simulated_by_default():
+    controller = MouseController()
+    assert "Modo de teste" in controller.click_left()
+    assert "Modo de teste" in controller.press_left()
+    assert "Modo de teste" in controller.release_left()

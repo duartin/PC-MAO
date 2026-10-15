@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "profiles": {
+    "Default": {
+      "motion_sensitivity": 1.0,
+      "cursor_smoothing": 0.32,
+      "cursor_margin": 0.12,
+      "scroll_repeat_seconds": 0.18,
+      "zoom_repeat_seconds": 0.22,
+      "action_switch_delay_seconds": 1.5,
+      "mappings": {
+        "thumb_up": "enter",
+        "thumb_down": "esc",
+        "swipe_left": "alt+left",
+        "swipe_right": "alt+right"
+      }
+    },
+    "Apresentação": {
+      "motion_sensitivity": 1.0,
+      "cursor_smoothing": 0.40,
+      "cursor_margin": 0.10,
+      "scroll_repeat_seconds": 0.18,
+      "zoom_repeat_seconds": 0.22,
+      "action_switch_delay_seconds": 1.5,
+      "mappings": {
+        "thumb_up": "space",
+        "thumb_down": "esc",
+        "swipe_left": "alt+left",
+        "swipe_right": "alt+right"
+      }
+    }
+  }
+}

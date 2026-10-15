@@ -1,6 +1,6 @@
 # Atualizar e salvar PC-MAO no GitHub (PowerShell)
 
-O ZIP distribuído pelo Manus contém os arquivos do projeto, mas **não inclui `.git`**. Não rode `git add`, `git commit` ou `git push` dentro da pasta extraída do ZIP. Copie os arquivos para o clone original, que contém `.git`.
+O ZIP distribuído contém os arquivos do projeto, mas **não inclui `.git`**. Não rode comandos Git dentro da pasta extraída. Copie os arquivos atualizados para o clone original, que contém `.git`.
 
 ## 1. Confirmar a pasta clonada
 
@@ -9,7 +9,7 @@ $repo = "$HOME\Downloads\PC-MAO"
 Test-Path "$repo\.git"
 ```
 
-O resultado precisa ser `True`. Se for `False`, localize a pasta onde executou `git clone`; não inicialize um repositório novo sobre a pasta extraída.
+O resultado precisa ser `True`. Se for `False`, localize a pasta onde executou `git clone`; não inicialize outro repositório sobre a pasta extraída.
 
 ## 2. Copiar a atualização extraída para o clone
 
@@ -35,11 +35,11 @@ python -m pytest -q
 git status --short
 git add -A
 git diff --cached
-git commit -m "Adiciona cursor pelo indicador e ajusta delay"
+git commit -m "Adiciona clique, arraste, perfis e calibracao"
 git push -u origin main
 ```
 
-`git commit` grava a versão no computador. `git push` envia os commits ao GitHub.
+`git commit` grava a versão no computador. `git push` envia os commits ao GitHub. Revise `git diff --cached` antes do commit. Os perfis pessoais ficam em `%USERPROFILE%\.pc-mao\profiles.json`, fora do repositório.
 
 ## Clonar pela primeira vez
 

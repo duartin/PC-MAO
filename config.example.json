@@ -2,11 +2,10 @@
   "mode": "test",
   "initial_control_mode": "mouse",
   "min_confidence": 0.78,
-  "hold_seconds": 0.25,
-  "cooldown_seconds": 1.5,
-  "neutral_seconds": 0.25,
-  "mode_pose_hold_seconds": 0.25,
-  "mode_sequence_timeout_seconds": 2.2,
+  "gesture_stability_seconds": 0.25,
+  "click_min_hold_seconds": 0.12,
+  "click_release_stability_seconds": 0.12,
+  "drag_hold_seconds": 0.55,
   "action_switch_delay_seconds": 1.5,
   "scroll_repeat_seconds": 0.18,
   "zoom_repeat_seconds": 0.22,
@@ -20,7 +19,9 @@
     "Indicador apontado": "move_cursor",
     "Dois dedos para cima": "scroll_up",
     "Dois dedos para baixo": "scroll_down",
-    "Pinça afastando": "zoom_in",
-    "Pinça aproximando": "zoom_out"
-  }
+    "Pinça polegar-indicador": "zoom",
+    "Toque polegar-médio": "left_click",
+    "Manter polegar-médio": "drag"
+  },
+  "profile_storage": "~/.pc-mao/profiles.json"
 }

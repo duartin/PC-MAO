@@ -1,33 +1,58 @@
-# Controle do computador por gestos — protótipo
+# PC-MAO — controle do computador por gestos
 
-Aplicação local em Python para controlar o computador por poses e movimentos da mão capturados pela webcam. O processamento é local; as imagens não são enviadas nem gravadas.
+Aplicação local em Python para controlar o computador por poses e movimentos da mão capturados pela webcam. O processamento é feito no dispositivo; o programa não grava nem envia imagens.
 
-Para salvar alterações no GitHub, copie os arquivos atualizados para a pasta clonada `PC-MAO` que contém `.git`; o ZIP de distribuição não inclui o histórico Git. Veja [`GIT_COMANDOS.md`](GIT_COMANDOS.md) para os comandos PowerShell.
+Para registrar atualizações no GitHub, aplique os arquivos na pasta clonada `PC-MAO`, que contém `.git`. O ZIP de distribuição não inclui o histórico Git. Consulte [`GIT_COMANDOS.md`](GIT_COMANDOS.md).
 
-## Recursos desta versão
+## Recursos
 
-- Interface PySide6 com vídeo, status, modo ativo, histórico e controles da câmera.
-- **Modo Mouse** ativo por padrão: cursor pelo indicador, rolagem vertical sustentada por dois dedos e zoom por pinça.
-- **Modo Atalhos** separado: `Enter`, `Esc` e navegação horizontal no histórico do navegador.
-- Movimento do cursor contínuo e suavizado; não espera 1,5 s para começar.
-- Poses estáticas estabilizam por **0,25 s**. A rolagem também começa após 0,25 s e continua a cada 0,18 s enquanto a pose for mantida.
-- **1,5 s é o intervalo entre ações pontuais** (por exemplo, um atalho e o próximo), não um atraso inicial para mover o cursor ou iniciar a rolagem. Cursor, rolagem sustentada e zoom contínuo têm cadências próprias.
-- Modo de teste por padrão. Marque **Executar ações reais no computador** para permitir cursor, atalhos, rolagem e zoom reais.
-- Vídeo e reconhecimento executados em thread de fundo; imagens não são armazenadas.
+- Interface PySide6 com vídeo, modo ativo, histórico de ações, perfis, mapeamentos e ajustes.
+- **Modo Mouse** inicia ativo. O indicador move o cursor; dois dedos apontados rolam; a pinça polegar–indicador ajusta o zoom.
+- **Clique e arraste** usam uma pinça diferente: toque rápido do polegar com o dedo médio clica; segurar a pose inicia o arraste. Soltar a pose encerra o arraste. Dois toques rápidos podem gerar clique duplo nativo.
+- **Modo Atalhos** é exclusivo e separado dos gestos do mouse. As sequências de mão aberta e punho alternam os modos.
+- A moldura rosa no preview mostra a área ativa do cursor. A margem, suavização, sensibilidade de deslizes, frequência de rolagem/zoom e intervalo entre ações podem ser ajustados.
+- Perfis nomeados armazenam esses parâmetros e quatro mapeamentos de atalhos em JSON.
+- O modo de teste é padrão. A caixa **Executar ações reais no computador** precisa estar marcada para mover o cursor, clicar, arrastar, enviar atalhos ou controlar rolagem/zoom de verdade.
 
-Clique, clique duplo e arraste ainda não foram adicionados. A pinça está reservada ao zoom.
+## Gestos
 
-`config.example.json` é um exemplo de mapeamentos e parâmetros; esta versão ainda não carrega esse arquivo automaticamente.
+### Modo Mouse
 
-## Requisitos
+| Gesto | Ação |
+| --- | --- |
+| Indicador estendido sozinho | Mover cursor |
+| Dois dedos apontados para cima | Rolar para cima continuamente |
+| Dois dedos apontados para baixo | Rolar para baixo continuamente |
+| Aproximar/afastar polegar e indicador | Reduzir/aumentar zoom |
+| Toque rápido do polegar com o dedo médio | Clique esquerdo |
+| Manter polegar e dedo médio juntos por cerca de 0,55 s | Iniciar arraste; mover o indicador para deslocar e soltar para finalizar |
 
-- Windows 10 ou 11
+O clique exige uma pose reconhecida por pelo menos 0,12 s e uma soltura estável por mais 0,12 s para filtrar tremores. O arraste libera o botão se a mão sumir, se o reconhecimento for pausado, se houver troca de modo ou quando a câmera parar. A pinça polegar–indicador continua reservada ao zoom.
+
+### Modo Atalhos
+
+| Gesto | Mapeamento padrão |
+| --- | --- |
+| Polegar para cima | `Enter` |
+| Polegar para baixo | `Esc` |
+| Deslize horizontal para a esquerda | `Alt+Left` |
+| Deslize horizontal para a direita | `Alt+Right` |
+
+As sequências são: mão aberta → punho → mão aberta para ativar Atalhos; punho → mão aberta → punho → mão aberta para voltar ao Mouse. Mão aberta e punho ficam reservados à alternância.
+
+## Temporização e calibração
+
+Poses estáticas começam após **0,25 s** de estabilidade. A moldura rosa representa a área de entrada do cursor; ajuste **Margem da área ativa** no painel. Margens menores ampliam a região útil e podem aumentar o alcance da mão necessário; margens maiores ajudam a manter a mão dentro de uma zona mais restrita. A suavização controla a relação entre resposta e tremor.
+
+A rolagem começa após estabilidade e repete de acordo com o perfil (padrão **0,18 s**). O zoom tem intervalo mínimo próprio (padrão **0,22 s**). Os **1,5 s** padrão são o intervalo entre ações pontuais no modo Atalhos, não um atraso para iniciar cursor, clique/arraste, rolagem ou zoom.
+
+## Requisitos e instalação
+
+- Windows 10/11
 - Python 3.11 de 64 bits
 - Webcam integrada ou USB
 
-## Instalação
-
-No PowerShell, dentro da pasta clonada do repositório:
+No PowerShell, dentro da pasta clonada:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -36,74 +61,48 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-O `requirements.txt` instala MediaPipe, NumPy, PyAutoGUI, PySide6 e pytest. Se a ativação do ambiente for bloqueada, execute `Set-ExecutionPolicy -Scope Process Bypass` no PowerShell atual e ative novamente.
+Se a ativação do ambiente for bloqueada, execute `Set-ExecutionPolicy -Scope Process Bypass` no PowerShell atual e ative novamente.
 
-## Executar
+## Executar e testar
 
 ```powershell
 python -m pytest -q
 python -m gesture_control.app
 ```
 
-A janela começa em modo de teste. O movimento e as ações são simulados até marcar **Executar ações reais no computador**.
+A janela começa em modo de teste. Marque a caixa de execução real somente quando estiver pronto para permitir ações no computador.
 
 Parâmetros opcionais:
 
 ```powershell
-# Usar outra câmera
 python -m gesture_control.app --camera 1
-
-# Ajustar a sensibilidade dos deslizes horizontais (0.5 a 2.0; padrão 1.0)
+python -m gesture_control.app --profile Apresentação
 python -m gesture_control.app --motion-sensitivity 1.4
-
-# Abre com ações reais já habilitadas (use com cuidado)
-python -m gesture_control.app --execute
 ```
 
-## Troca de modos
+## Perfis e personalização
 
-Cada pose da sequência precisa ficar estável por aproximadamente **0,25 s**. Faça a próxima pose rapidamente, dentro do timeout de cerca de 2,2 s:
+A interface permite selecionar, criar e salvar perfis. O arquivo local padrão é `%USERPROFILE%\.pc-mao\profiles.json`. Ele não é sobrescrito pelo código-fonte nem enviado a lugar nenhum. [`profiles.example.json`](profiles.example.json) serve como modelo para editar/copiar perfis.
 
-- Mão aberta → punho → mão aberta: ativa **Atalhos**.
-- Punho → mão aberta → punho → mão aberta: ativa **Mouse**.
+Os mapeamentos permitidos para polegar para cima/baixo e deslize esquerdo/direito são atalhos de uma lista segura (`enter`, `esc`, `space`, `ctrl+s`, `alt+tab`, `alt+left`, `alt+right`, `zoom_in` e `zoom_out`). A lista não aceita comandos de shell, exclusão ou atalhos arbitrários. Os gestos de clique e arraste permanecem fixos para não conflitar com zoom e rolagem.
 
-O indicador na janela mostra o modo ativo. Mão aberta e punho são reservados à troca de modo, não enviam `Space` ou `Ctrl+S`.
+Ajuste as configurações na interface e clique em **Salvar perfil** para persistir. A seleção de outro perfil carrega os valores guardados; perfis podem também ser selecionados pela opção `--profile`.
 
-## Gestos no modo Mouse
+## Empacotamento Windows (opcional)
 
-| Gesto | Ação |
-| --- | --- |
-| Indicador estendido sozinho | Mover cursor |
-| Dois dedos apontados para cima | Rolar para cima |
-| Dois dedos apontados para baixo | Rolar para baixo |
-| Aproximar/afastar polegar e indicador | Reduzir/aumentar zoom |
+Na raiz do repositório, em PowerShell com Python 3.11 instalado:
 
-O cursor segue a ponta do indicador dentro de uma área central da imagem e é suavizado para reduzir tremor. A ponta precisa ser a única dos quatro dedos estendida; a pose é diferente dos dois dedos usados para rolagem e da pinça usada para zoom. A câmera é espelhada, então mover a mão para a direita no preview move o cursor para a direita.
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\build_windows.ps1
+```
 
-A rolagem começa quando a pose de dois dedos permanece estável por 0,25 s. Depois, envia um passo a cada 0,18 s, cerca de cinco passos por segundo. O zoom acompanha mudanças da distância normalizada entre polegar e indicador e emite passos com intervalo mínimo de 0,22 s.
+O executável é produzido em `dist\PC-MAO\PC-MAO.exe`. O script foi preparado, mas o build e o uso da webcam precisam ser validados em um computador Windows real.
 
-## Gestos no modo Atalhos
-
-| Gesto | Ação |
-| --- | --- |
-| Polegar para cima | `Enter` |
-| Polegar para baixo | `Esc` |
-| Deslize horizontal para a esquerda/direita | Voltar/avançar no histórico do navegador |
-
-Uma pose estática reconhecida começa após 0,25 s. Entre ações pontuais há intervalo de 1,5 s. O controle do cursor, a rolagem sustentada e o zoom não usam esse cooldown. Deslizes verticais não são usados para rolagem.
-
-## Testes
+## Testes e limites
 
 ```powershell
 python -m pytest -q
 ```
 
-Os testes cobrem poses, alternância de modos, zoom por pinça, mapeamento e suavização do cursor, rolagem em modo de teste e rearme das ações. A webcam e o movimento real do cursor precisam ser verificados no computador de destino.
-
-## Próximas etapas
-
-1. Clique e arraste com gestos que não conflitem com o zoom.
-2. Ajuste de velocidade do cursor, rolagem e zoom na interface.
-3. Personalização de gestos e perfis em JSON.
-4. Calibração visual da área de movimento.
-5. Teste no Windows e empacotamento com PyInstaller.
+Os testes cobrem poses, modos, mapeamentos allowlisted, perfis JSON, calibração de coordenadas, clique, arraste, zoom, rolagem simulada e liberação do botão em cancelamento. A webcam, o funcionamento do PyAutoGUI e o build final ainda precisam ser testados no computador Windows de destino.

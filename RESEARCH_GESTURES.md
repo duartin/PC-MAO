@@ -1,25 +1,26 @@
-# Pesquisa: gestos em projetos de mouse virtual
+# Pesquisa: padrões de interação em mouse virtual por gestos
 
 ## Padrões observados
 
-A documentação oficial do MediaPipe descreve 21 landmarks de mão e coordenadas `x` e `y` normalizadas pela largura e altura da imagem. Em processamento de vídeo/stream, o tracking reaproveita a detecção entre quadros para reduzir latência. Isso sustenta o uso do landmark 8 (ponta do indicador) em coordenadas normalizadas para mapear o cursor, mantendo a execução no fluxo de câmera existente. [1]
+A documentação do MediaPipe descreve 21 landmarks de mão e coordenadas `x` e `y` normalizadas pela imagem. Isso permite mapear a ponta do indicador para uma área de tela e manter o processamento no fluxo local de vídeo. [1]
 
-Nos projetos comparados, o padrão mais recorrente é **indicador isolado para mover o cursor**. Tanto `Rusheekg/Virtual-Mouse` quanto `AppajiDheeraj/Virtual-Mouse` usam esse movimento; os dois mencionam suavização e mapeamento do espaço da câmera para a tela. O código do primeiro suaviza o cursor a cada quadro antes de mover o ponteiro. [2] [3] [6]
+Nos projetos consultados, o indicador isolado é um padrão recorrente para mover o cursor. Os projetos também aplicam suavização e mapeamento da área da câmera para a tela para reduzir tremor e evitar exigir movimentos até a borda da imagem. [2] [3] [4]
 
-A **pinça polegar–indicador** é comum como ação discreta. Um projeto a usa para clique; outro usa a distância para reconhecer clique direito/arraste, enquanto a rolagem fica em um gesto diferente. As convenções de clique e arraste variam entre projetos; não há um único mapa universal. [2] [3] [4] [7]
+`parthahuja33/gesture-mouse` documenta indicador para cursor, pinça para clique e pinça sustentada para arraste. Também separa rolagem em um gesto de dedo médio, recomenda suavização e oferece configuração de thresholds. [5] Isso é um precedente direto para distinguir toque de gesto sustentado pelo tempo, não para copiar os mesmos dedos: neste projeto, polegar–indicador já controla zoom.
 
-Para rolagem, as implementações consultadas usam combinações distintas: dois dedos, dedos juntos e movimento vertical, ou mão aberta com deslocamento. Isso confirma que a separação por modos e poses claramente distintas é uma escolha adequada para reduzir conflito neste projeto. [2] [3] [4]
+O projeto `faizahmad-khan/AI-VIRTUAL-MOUSE` mostra outra variação: combina movimento do indicador, pinças para ações distintas e uma GUI para ajustar sensibilidade, limiares e área de movimento. Seu guia destaca a separação de scroll, clique e arraste por prioridade no processamento. [6] A página técnica da GeeksforGeeks também descreve estabilização de poses por vários quadros e liberação de `mouseUp` ao terminar arraste, reforçando que a máquina de estados precisa tratar a soltura explicitamente. [7]
 
-O projeto `small-cactus/handTrack` descreve uma área interna da imagem mapeada para a tela e suavização do cursor com limiar de tremor; também desativa o movimento quando a mão some e protege a liberação do botão do mouse. O código consultado usa outra referência de posição (base do anelar), portanto esta implementação não copia esse detalhe: adota a ponta do indicador solicitada pelo usuário. [4] [5]
+Os mapas de gesto variam entre projetos; não existe uma convenção universal. Há implementações que usam a pinça polegar–indicador para clique e arraste, outras atribuem clique direito à pinça polegar–médio, e outras separam rolagem por postura ou movimento. [2] [3] [5] [6] Por isso, a decisão aqui prioriza não reutilizar a pinça já atribuída ao zoom.
 
-## Decisão aplicada ao PC-MAO
+## Decisões aplicadas ao PC-MAO
 
-- Cursor: indicador estendido sozinho, usando landmark 8.
-- Suavização: filtro de primeira ordem e área útil central com margens para alcançar as bordas da tela sem levar a mão até o limite da imagem.
-- Rolagem: manter os dois dedos já validados pelo usuário; inicia após estabilidade curta e repete continuamente.
-- Zoom: pinça em via exclusiva, sem atualizar o zoom durante o gesto de cursor.
-- Temporização: poses começam após 0,25 s de estabilidade; 1,5 s fica como cooldown entre ações discretas, sem atrasar cursor ou rolagem contínua.
-- Segurança: cursor/atalhos/rolagem/zoom reais permanecem atrás da caixa de ativação; o modo padrão simula.
+- **Cursor:** indicador sozinho, landmark 8, com filtro de suavização e mapeamento dentro de área configurável.
+- **Calibração:** margem ajustável por perfil e moldura rosa desenhada no vídeo para mostrar a zona que mapeia para a tela. Isso oferece feedback visual sem iniciar um wizard dependente de posicionamento preciso nos quatro cantos.
+- **Clique/arraste:** pinça polegar–médio, distinta da pinça polegar–indicador do zoom. Uma pinça curta clica; manter por aproximadamente 0,55 s inicia arraste; soltar finaliza. O clique tem duração mínima e debounce de soltura para reduzir falsos positivos.
+- **Recuperação segura:** perda da mão, pausa, troca de modo e encerramento cancelam o clique candidato e liberam o botão se o arraste estava ativo.
+- **Rolagem/zoom:** dois dedos apontados e pinça polegar–indicador preservados; cadências ajustáveis no perfil.
+- **Perfis:** ajustes numéricos e quatro atalhos de poses/deslizes são guardados em JSON local; as ações de teclado são verificadas contra allowlist.
+- **Ativação real:** permanece desabilitada por padrão. O usuário precisa marcar a caixa da interface.
 
 ## Referências
 
@@ -27,6 +28,6 @@ O projeto `small-cactus/handTrack` descreve uma área interna da imagem mapeada 
 [2]: https://github.com/Rusheekg/Virtual-Mouse "Rusheekg/Virtual-Mouse"
 [3]: https://github.com/AppajiDheeraj/Virtual-Mouse "AppajiDheeraj/Virtual-Mouse"
 [4]: https://github.com/small-cactus/handTrack "small-cactus/handTrack"
-[5]: https://raw.githubusercontent.com/small-cactus/handTrack/main/handTrack.py "Código do small-cactus/handTrack"
-[6]: https://raw.githubusercontent.com/Rusheekg/Virtual-Mouse/main/Virtual_Mouse.py "Código do Rusheekg/Virtual-Mouse"
-[7]: https://raw.githubusercontent.com/AppajiDheeraj/Virtual-Mouse/main/mouse.py "Código do AppajiDheeraj/Virtual-Mouse"
+[5]: https://github.com/parthahuja33/gesture-mouse "parthahuja33/gesture-mouse"
+[6]: https://github.com/faizahmad-khan/AI-VIRTUAL-MOUSE "faizahmad-khan/AI-VIRTUAL-MOUSE"
+[7]: https://www.geeksforgeeks.org/computer-vision/ai-virtual-mouse/ "GeeksforGeeks: AI Virtual Mouse"

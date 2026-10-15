@@ -1,7 +1,7 @@
-"""Mouse actions with dry-run defaults and smoothed cursor mapping."""
+"""Mouse actions with dry-run defaults and configurable cursor mapping."""
 
 # One wheel step per repeat makes sustained scrolling smooth and controllable.
-SCROLL_TICKS = {"scroll_up": 80, "scroll_down": -85}
+SCROLL_TICKS = {"scroll_up": 1, "scroll_down": -1}
 
 
 class MouseController:
@@ -11,22 +11,29 @@ class MouseController:
         self,
         dry_run: bool = True,
         smoothing: float = 0.32,
+        edge_margin: float = CURSOR_MARGIN,
         deadzone_pixels: float = 1.5,
     ):
         if not 0 < smoothing <= 1:
             raise ValueError("A suavização do cursor deve estar entre 0 e 1")
+        if not 0.0 <= edge_margin < 0.5:
+            raise ValueError("A margem do cursor precisa estar entre 0 e 0,5")
         self.dry_run = dry_run
         self.smoothing = smoothing
+        self.edge_margin = edge_margin
         self.deadzone_pixels = deadzone_pixels
         self._smoothed_cursor = None
+        self._left_button_down = False
 
     @classmethod
-    def map_to_screen(cls, x, y, width, height):
-        """Map normalized camera coordinates to the inner 76% of screen travel."""
+    def map_to_screen(cls, x, y, width, height, margin=None):
+        """Map normalized camera coordinates from a calibrated area to screen."""
         if width <= 0 or height <= 0:
             raise ValueError("A resolução da tela deve ser positiva")
+        margin = cls.CURSOR_MARGIN if margin is None else float(margin)
+        if not 0.0 <= margin < 0.5:
+            raise ValueError("A margem precisa estar entre 0 e 0,5")
 
-        margin = cls.CURSOR_MARGIN
         span = 1.0 - 2.0 * margin
         norm_x = min(1.0, max(0.0, (float(x) - margin) / span))
         norm_y = min(1.0, max(0.0, (float(y) - margin) / span))
@@ -60,10 +67,18 @@ class MouseController:
             import pyautogui
 
             width, height = pyautogui.size()
-            target_x, target_y = self.map_to_screen(x, y, width, height)
+            target_x, target_y = self.map_to_screen(
+                x,
+                y,
+                width,
+                height,
+                margin=self.edge_margin,
+            )
             smooth_x, smooth_y = self._smooth(target_x, target_y)
             current_x, current_y = pyautogui.position()
-            distance = ((smooth_x - current_x) ** 2 + (smooth_y - current_y) ** 2) ** 0.5
+            distance = (
+                (smooth_x - current_x) ** 2 + (smooth_y - current_y) ** 2
+            ) ** 0.5
             if distance >= self.deadzone_pixels:
                 pyautogui.moveTo(
                     round(smooth_x),
@@ -74,6 +89,42 @@ class MouseController:
             raise RuntimeError(f"Falha ao mover o cursor: {exc}") from exc
 
         return "Cursor atualizado"
+
+    def click_left(self) -> str:
+        if self.dry_run:
+            return "Modo de teste: clique esquerdo seria executado"
+        try:
+            import pyautogui
+            pyautogui.click(button="left")
+        except Exception as exc:
+            raise RuntimeError(f"Falha ao clicar: {exc}") from exc
+        return "Clique esquerdo executado"
+
+    def press_left(self) -> str:
+        if self._left_button_down:
+            return "Botão esquerdo já pressionado"
+        if self.dry_run:
+            self._left_button_down = True
+            return "Modo de teste: arraste iniciado"
+        try:
+            import pyautogui
+            pyautogui.mouseDown(button="left")
+            self._left_button_down = True
+        except Exception as exc:
+            raise RuntimeError(f"Falha ao iniciar arraste: {exc}") from exc
+        return "Arraste iniciado"
+
+    def release_left(self) -> str:
+        if not self._left_button_down:
+            return "Botão esquerdo já liberado"
+        try:
+            if not self.dry_run:
+                import pyautogui
+                pyautogui.mouseUp(button="left")
+        except Exception as exc:
+            raise RuntimeError(f"Falha ao liberar botão do mouse: {exc}") from exc
+        self._left_button_down = False
+        return "Arraste finalizado" if not self.dry_run else "Modo de teste: arraste finalizado"
 
     def execute(self, action: str) -> str:
         ticks = SCROLL_TICKS.get(action)

@@ -1,0 +1,14 @@
+{
+  "mode": "test",
+  "min_confidence": 0.78,
+  "hold_seconds": 0.65,
+  "cooldown_seconds": 1.2,
+  "neutral_seconds": 0.45,
+  "gestures": {
+    "Polegar para cima": "enter",
+    "Polegar para baixo": "esc",
+    "Mão aberta": "space",
+    "Punho fechado": "ctrl+s",
+    "Dois dedos": "alt+tab"
+  }
+}

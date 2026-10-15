@@ -1,0 +1,4 @@
+mediapipe==0.10.21
+numpy<2
+PyAutoGUI==0.9.54
+pytest>=8,<9

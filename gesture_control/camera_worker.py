@@ -9,8 +9,10 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 from .keyboard_controller import KeyboardController
+from .mode_manager import ModeManager
 from .motion_recognizer import MotionRecognizer
 from .mouse_controller import MouseController
+from .pinch_zoom import PinchZoomRecognizer
 from .recognizer import HandGestureRecognizer
 from .safety_manager import SafetyManager, SafetySettings
 
@@ -19,17 +21,13 @@ class CameraWorker(QThread):
     frame_ready = Signal(QImage)
     status_changed = Signal(str)
     action_recorded = Signal(str, str, str)
+    mode_changed = Signal(str)
 
-    ACTION_DELAY_SECONDS = 1.5
+    ACTION_SWITCH_DELAY_SECONDS = 1.5
+    GESTURE_STABILITY_SECONDS = 0.25
     SCROLL_REPEAT_SECONDS = 0.18
 
-    def __init__(
-        self,
-        camera_index=0,
-        execute=False,
-        motion_sensitivity=1.0,
-        parent=None,
-    ):
+    def __init__(self, camera_index=0, execute=False, motion_sensitivity=1.0, parent=None):
         super().__init__(parent)
         self.camera_index = camera_index
         self.execute_actions = execute
@@ -53,30 +51,28 @@ class CameraWorker(QThread):
         keyboard,
         mouse,
         now,
-        bypass_delay=False,
+        continuous=False,
     ):
         elapsed = now - self._last_action_time
-        if not bypass_delay and elapsed < self.ACTION_DELAY_SECONDS:
-            remaining = self.ACTION_DELAY_SECONDS - elapsed
-            return f"Aguardando intervalo de segurança ({remaining:.1f}s)"
+        if not continuous and elapsed < self.ACTION_SWITCH_DELAY_SECONDS:
+            remaining = self.ACTION_SWITCH_DELAY_SECONDS - elapsed
+            return f"Aguardando intervalo entre ações ({remaining:.1f}s)"
 
         if action.startswith("scroll_"):
             result = mouse.execute(action)
         else:
-            shortcut = {
-                "page_forward": "alt+right",
-                "page_back": "alt+left",
-            }.get(action, action)
-            result = keyboard.execute(shortcut)
+            result = keyboard.execute(action)
 
-        self._last_action_time = now
+        # Continuous cursor, scroll and zoom updates are not discrete actions.
+        if not continuous:
+            self._last_action_time = now
+
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.action_recorded.emit(timestamp, gesture_name, result)
         return result
 
     def run(self) -> None:
         cap = cv2.VideoCapture(self.camera_index)
-
         if not cap.isOpened():
             cap.release()
             self.status_changed.emit(
@@ -85,26 +81,33 @@ class CameraWorker(QThread):
             return
 
         self.status_changed.emit("Câmera ativa — processamento local.")
-
         hands_api = mp.solutions.hands
         recognizer = HandGestureRecognizer()
+        mode_manager = ModeManager(initial_mode=ModeManager.MOUSE)
+        pinch_zoom = PinchZoomRecognizer()
+        self.mode_changed.emit(mode_manager.mode)
+        self.status_changed.emit(
+            "Modo Mouse ativo. Para Atalhos: mão aberta-punho-mão aberta; "
+            "para Mouse: punho-mão aberta-punho-mão aberta."
+        )
+
         motion_recognizer = MotionRecognizer(
             sensitivity=self.motion_sensitivity,
             enable_vertical=False,
         )
         safety = SafetyManager(
             SafetySettings(
-                hold_seconds=1.5,
-                cooldown_seconds=1.5,
-                neutral_seconds=0.45,
+                hold_seconds=self.GESTURE_STABILITY_SECONDS,
+                cooldown_seconds=self.ACTION_SWITCH_DELAY_SECONDS,
+                neutral_seconds=0.25,
                 min_confidence=0.78,
             )
         )
         keyboard = KeyboardController(dry_run=not self.execute_actions)
         mouse = MouseController(dry_run=not self.execute_actions)
-
         scroll_candidate = None
         scroll_candidate_since = 0.0
+        last_scroll_action_time = float("-inf")
 
         try:
             with hands_api.Hands(
@@ -123,7 +126,6 @@ class CameraWorker(QThread):
                         break
 
                     frame = cv2.flip(frame, 1)
-
                     if not self._is_paused():
                         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         result = hands.process(rgb)
@@ -141,83 +143,163 @@ class CameraWorker(QThread):
                             detected = recognizer.recognize(hand_landmarks)
 
                         now = time.monotonic()
-                        motion = motion_recognizer.update(
-                            hand_landmarks,
-                            now,
+                        changed_mode = mode_manager.update(detected, now)
+                        if changed_mode:
+                            self.mode_changed.emit(changed_mode)
+                            label = (
+                                "Atalhos"
+                                if changed_mode == ModeManager.KEYBOARD
+                                else "Mouse"
+                            )
+                            self.status_changed.emit(f"Modo {label} ativado.")
+
+                        is_mode_pose = (
+                            detected is not None
+                            and detected.action in (
+                                ModeManager.OPEN_ACTION,
+                                ModeManager.FIST_ACTION,
+                            )
                         )
 
-                        if motion:
+                        if (
+                            mode_manager.mode == ModeManager.MOUSE
+                            and detected is not None
+                            and detected.action == "pinch"
+                        ):
+                            zoom_action = pinch_zoom.update(hand_landmarks, now)
+                        else:
+                            pinch_zoom.reset()
+                            zoom_action = None
+
+                        # Open palm and fist are reserved for switching modes.
+                        if is_mode_pose:
                             scroll_candidate = None
                             safety.suppress_until_neutral()
+
+                        # Cursor movement is continuous and starts as soon as
+                        # the index-only pose is tracked; no 1.5 s hold applies.
+                        elif detected and detected.action == "cursor":
+                            scroll_candidate = None
+                            safety.suppress_until_neutral()
+                            if mode_manager.mode == ModeManager.MOUSE:
+                                index_tip = hand_landmarks[8]
+                                mouse.move_cursor(index_tip.x, index_tip.y)
+
+                        elif zoom_action and mode_manager.mode == ModeManager.MOUSE:
+                            scroll_candidate = None
+                            safety.suppress_until_neutral()
+                            zoom_name = (
+                                "Pinça afastando — zoom +"
+                                if zoom_action == "zoom_in"
+                                else "Pinça aproximando — zoom −"
+                            )
                             response = self._dispatch(
-                                motion.name,
-                                motion.action,
+                                zoom_name,
+                                zoom_action,
                                 keyboard,
                                 mouse,
                                 now,
+                                continuous=True,
                             )
-                            self.status_changed.emit(
-                                f"{motion.name}: {response}"
-                            )
-
-                        elif detected and detected.action in (
-                            "scroll_up",
-                            "scroll_down",
-                        ):
-                            safety.suppress_until_neutral()
-
-                            if detected.action != scroll_candidate:
-                                scroll_candidate = detected.action
-                                scroll_candidate_since = now
-
-                            stable_for = now - scroll_candidate_since
-                            repeat_elapsed = now - self._last_action_time
-
-                            if (
-                                stable_for >= self.ACTION_DELAY_SECONDS
-                                and repeat_elapsed >= self.SCROLL_REPEAT_SECONDS
-                            ):
-                                response = self._dispatch(
-                                    detected.name,
-                                    detected.action,
-                                    keyboard,
-                                    mouse,
-                                    now,
-                                    bypass_delay=True,
-                                )
-                                self.status_changed.emit(
-                                    f"{detected.name}: {response}"
-                                )
-                            else:
-                                remaining = max(
-                                    0.0,
-                                    self.ACTION_DELAY_SECONDS - stable_for,
-                                )
-                                self.status_changed.emit(
-                                    f"{detected.name} — mantenha; "
-                                    f"rolagem em {remaining:.1f}s"
-                                )
+                            self.status_changed.emit(f"{zoom_name}: {response}")
 
                         else:
-                            scroll_candidate = None
-                            confirmed = safety.update(detected, now)
+                            motion = motion_recognizer.update(
+                                hand_landmarks,
+                                now,
+                            )
 
-                            if confirmed:
-                                response = self._dispatch(
-                                    confirmed.name,
-                                    confirmed.action,
-                                    keyboard,
-                                    mouse,
-                                    now,
-                                )
-                                self.status_changed.emit(
-                                    f"{confirmed.name}: {response}"
-                                )
-                            elif detected:
-                                self.status_changed.emit(
-                                    f"Candidato: {detected.name} — "
-                                    "mantenha por 1,5 s"
-                                )
+                            if motion:
+                                scroll_candidate = None
+                                safety.suppress_until_neutral()
+                                if mode_manager.mode == ModeManager.KEYBOARD:
+                                    response = self._dispatch(
+                                        motion.name,
+                                        motion.action,
+                                        keyboard,
+                                        mouse,
+                                        now,
+                                    )
+                                    self.status_changed.emit(
+                                        f"{motion.name}: {response}"
+                                    )
+                                else:
+                                    self.status_changed.emit(
+                                        "Deslize horizontal ignorado no modo Mouse."
+                                    )
+
+                            elif detected and detected.action in (
+                                "scroll_up",
+                                "scroll_down",
+                            ):
+                                if mode_manager.mode == ModeManager.MOUSE:
+                                    safety.suppress_until_neutral()
+                                    if detected.action != scroll_candidate:
+                                        scroll_candidate = detected.action
+                                        scroll_candidate_since = now
+
+                                    stable_for = now - scroll_candidate_since
+                                    repeat_elapsed = now - last_scroll_action_time
+                                    if (
+                                        stable_for >= self.GESTURE_STABILITY_SECONDS
+                                        and repeat_elapsed >= self.SCROLL_REPEAT_SECONDS
+                                    ):
+                                        response = self._dispatch(
+                                            detected.name,
+                                            detected.action,
+                                            keyboard,
+                                            mouse,
+                                            now,
+                                            continuous=True,
+                                        )
+                                        last_scroll_action_time = now
+                                        self.status_changed.emit(
+                                            f"{detected.name}: {response}"
+                                        )
+                                    else:
+                                        remaining = max(
+                                            0.0,
+                                            self.GESTURE_STABILITY_SECONDS - stable_for,
+                                        )
+                                        self.status_changed.emit(
+                                            f"{detected.name} — mantenha; "
+                                            f"rolagem em {remaining:.1f}s"
+                                        )
+                                else:
+                                    scroll_candidate = None
+                                    safety.update(None, now)
+
+                            elif detected and detected.action == "pinch":
+                                scroll_candidate = None
+                                safety.update(None, now)
+
+                            else:
+                                scroll_candidate = None
+                                if (
+                                    mode_manager.mode == ModeManager.KEYBOARD
+                                    and detected is not None
+                                    and detected.action in ("enter", "esc")
+                                ):
+                                    confirmed = safety.update(detected, now)
+                                    if confirmed:
+                                        response = self._dispatch(
+                                            confirmed.name,
+                                            confirmed.action,
+                                            keyboard,
+                                            mouse,
+                                            now,
+                                        )
+                                        self.status_changed.emit(
+                                            f"{confirmed.name}: {response}"
+                                        )
+                                    elif detected:
+                                        self.status_changed.emit(
+                                            f"Candidato: {detected.name} — "
+                                            f"estabilizando por "
+                                            f"{self.GESTURE_STABILITY_SECONDS:.2f} s"
+                                        )
+                                else:
+                                    safety.update(None, now)
 
                     if self._is_paused():
                         cv2.putText(
@@ -242,9 +324,7 @@ class CameraWorker(QThread):
                     self.frame_ready.emit(image)
 
         except Exception as exc:
-            self.status_changed.emit(
-                f"Falha no reconhecimento: {exc}"
-            )
+            self.status_changed.emit(f"Falha no reconhecimento: {exc}")
         finally:
             cap.release()
             self.status_changed.emit("Câmera desligada.")

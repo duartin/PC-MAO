@@ -8,6 +8,8 @@ SHORTCUTS = {
     "alt+tab": ("alt", "tab"),
     "alt+left": ("alt", "left"),
     "alt+right": ("alt", "right"),
+    "zoom_in": ("ctrl", "="),
+    "zoom_out": ("ctrl", "-"),
 }
 
 

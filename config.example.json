@@ -1,15 +1,26 @@
 {
   "mode": "test",
+  "initial_control_mode": "mouse",
   "min_confidence": 0.78,
-  "hold_seconds": 1.5,
+  "hold_seconds": 0.25,
   "cooldown_seconds": 1.5,
-  "neutral_seconds": 0.45,
+  "neutral_seconds": 0.25,
+  "mode_pose_hold_seconds": 0.25,
+  "mode_sequence_timeout_seconds": 2.2,
+  "action_switch_delay_seconds": 1.5,
+  "scroll_repeat_seconds": 0.18,
+  "zoom_repeat_seconds": 0.22,
+  "cursor_smoothing": 0.32,
+  "cursor_edge_margin": 0.12,
   "gestures": {
     "Polegar para cima": "enter",
     "Polegar para baixo": "esc",
-    "Mão aberta": "space",
-    "Punho fechado": "ctrl+s",
+    "Mão aberta": "mode_sequence_open",
+    "Punho fechado": "mode_sequence_fist",
+    "Indicador apontado": "move_cursor",
     "Dois dedos para cima": "scroll_up",
-    "Dois dedos para baixo": "scroll_down"
+    "Dois dedos para baixo": "scroll_down",
+    "Pinça afastando": "zoom_in",
+    "Pinça aproximando": "zoom_out"
   }
 }

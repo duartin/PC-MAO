@@ -35,7 +35,7 @@ python -m pytest -q
 git status --short
 git add -A
 git diff --cached
-git commit -m "Adiciona clique, arraste, perfis e calibracao"
+git commit -m "Melhora cliques, perfis e controle do cursor"
 git push -u origin main
 ```
 

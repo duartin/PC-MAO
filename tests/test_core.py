@@ -129,3 +129,31 @@ def test_mouse_click_and_drag_buttons_are_simulated_by_default():
     assert "Modo de teste" in controller.click_left()
     assert "Modo de teste" in controller.press_left()
     assert "Modo de teste" in controller.release_left()
+    assert "Modo de teste" in controller.click_right()
+    assert "Modo de teste" in controller.double_click_left()
+
+
+def test_mouse_cursor_controls_reject_unsafe_settings():
+    controller = MouseController(speed=1.7, acceleration=1.2, deadzone_pixels=4)
+    assert controller.speed == 1.7
+    assert controller.acceleration == 1.2
+    assert controller.deadzone_pixels == 4
+    try:
+        MouseController(speed=9)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unsafe cursor speed must be rejected")
+
+
+def test_thumb_ring_pinch_is_a_distinct_right_click_pose():
+    points = landmarks((8, 12))
+    points[17] = P(x=0.60, y=0.55)
+    points[18] = P(x=0.58, y=0.52)
+    points[20] = P(x=0.58, y=0.60)
+    points[16] = P(x=0.50, y=0.60)
+    points[14] = P(x=0.52, y=0.52)
+    points[13] = P(x=0.52, y=0.55)
+    points[4] = P(x=0.50, y=0.60)
+    gesture = HandGestureRecognizer().recognize(points)
+    assert gesture.action == "right_click"

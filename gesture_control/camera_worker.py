@@ -131,6 +131,9 @@ class CameraWorker(QThread):
             dry_run=not self.execute_actions,
             smoothing=self.profile["cursor_smoothing"],
             edge_margin=self.profile["cursor_margin"],
+            speed=self.profile["cursor_speed"],
+            acceleration=self.profile["cursor_acceleration"],
+            deadzone_pixels=self.profile["cursor_deadzone_pixels"],
         )
         click_drag = ClickDragController(mouse)
         self.mode_changed.emit(mode_manager.mode)
@@ -142,6 +145,8 @@ class CameraWorker(QThread):
         scroll_candidate = None
         scroll_candidate_since = 0.0
         last_scroll_action_time = float("-inf")
+        right_click_latched = False
+        right_click_started_at = None
 
         try:
             with hands_api.Hands(
@@ -206,6 +211,31 @@ class CameraWorker(QThread):
                             )
                         )
                         action = getattr(detected, "action", None)
+                        if detected is not None:
+                            cv2.putText(
+                                frame,
+                                f"{detected.name}  {detected.confidence:.0%}",
+                                (18, 34),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.62,
+                                (80, 230, 140),
+                                2,
+                            )
+                        if action != "right_click":
+                            right_click_latched = False
+                            right_click_started_at = None
+                        elif mode_manager.mode == ModeManager.MOUSE:
+                            if right_click_started_at is None:
+                                right_click_started_at = now
+                            elif (
+                                not right_click_latched
+                                and now - right_click_started_at
+                                >= self.GESTURE_STABILITY_SECONDS
+                            ):
+                                right_click_latched = True
+                                self._record_mouse_event(
+                                    ("Clique direito", mouse.click_right())
+                                )
                         if action in (
                             ModeManager.OPEN_ACTION,
                             ModeManager.FIST_ACTION,
@@ -216,6 +246,7 @@ class CameraWorker(QThread):
                             "pinch",
                             "scroll_up",
                             "scroll_down",
+                            "right_click",
                         ):
                             motion_recognizer.reset()
 

@@ -1,39 +1,36 @@
 """Mouse actions with dry-run defaults and configurable cursor mapping."""
-
-# One wheel step per repeat makes sustained scrolling smooth and controllable.
 SCROLL_TICKS = {"scroll_up": 1, "scroll_down": -1}
 
 
 class MouseController:
     CURSOR_MARGIN = 0.12
 
-    def __init__(
-        self,
-        dry_run: bool = True,
-        smoothing: float = 0.32,
-        edge_margin: float = CURSOR_MARGIN,
-        deadzone_pixels: float = 1.5,
-    ):
+    def __init__(self, dry_run=True, smoothing=0.32, edge_margin=CURSOR_MARGIN,
+                 deadzone_pixels=1.5, speed=1.0, acceleration=0.0):
         if not 0 < smoothing <= 1:
             raise ValueError("A suavização do cursor deve estar entre 0 e 1")
         if not 0.0 <= edge_margin < 0.5:
             raise ValueError("A margem do cursor precisa estar entre 0 e 0,5")
+        if not 0.5 <= speed <= 2.0 or not 0.0 <= acceleration <= 1.5:
+            raise ValueError("Velocidade/aceleração do cursor fora dos limites")
+        if deadzone_pixels < 0:
+            raise ValueError("A zona morta não pode ser negativa")
         self.dry_run = dry_run
         self.smoothing = smoothing
         self.edge_margin = edge_margin
         self.deadzone_pixels = deadzone_pixels
+        self.speed = speed
+        self.acceleration = acceleration
         self._smoothed_cursor = None
         self._left_button_down = False
 
     @classmethod
     def map_to_screen(cls, x, y, width, height, margin=None):
-        """Map normalized camera coordinates from a calibrated area to screen."""
         if width <= 0 or height <= 0:
             raise ValueError("A resolução da tela deve ser positiva")
         margin = cls.CURSOR_MARGIN if margin is None else float(margin)
         if not 0.0 <= margin < 0.5:
             raise ValueError("A margem precisa estar entre 0 e 0,5")
-
         span = 1.0 - 2.0 * margin
         norm_x = min(1.0, max(0.0, (float(x) - margin) / span))
         norm_y = min(1.0, max(0.0, (float(y) - margin) / span))
@@ -45,52 +42,35 @@ class MouseController:
         else:
             old_x, old_y = self._smoothed_cursor
             alpha = self.smoothing
-            self._smoothed_cursor = (
-                old_x + alpha * (target_x - old_x),
-                old_y + alpha * (target_y - old_y),
-            )
+            self._smoothed_cursor = (old_x + alpha * (target_x - old_x),
+                                     old_y + alpha * (target_y - old_y))
         return self._smoothed_cursor
 
-    def move_cursor(self, x, y) -> str:
-        """Move toward normalized index-tip coordinates; dry-run is default."""
-        x = min(1.0, max(0.0, float(x)))
-        y = min(1.0, max(0.0, float(y)))
-
+    def move_cursor(self, x, y):
+        x, y = min(1.0, max(0.0, float(x))), min(1.0, max(0.0, float(y)))
         if self.dry_run:
             smooth_x, smooth_y = self._smooth(x, y)
-            return (
-                "Modo de teste: cursor iria para "
-                f"({smooth_x:.2f}, {smooth_y:.2f})"
-            )
-
+            return f"Modo de teste: cursor iria para ({smooth_x:.2f}, {smooth_y:.2f})"
         try:
             import pyautogui
-
             width, height = pyautogui.size()
-            target_x, target_y = self.map_to_screen(
-                x,
-                y,
-                width,
-                height,
-                margin=self.edge_margin,
-            )
+            target_x, target_y = self.map_to_screen(x, y, width, height, self.edge_margin)
             smooth_x, smooth_y = self._smooth(target_x, target_y)
             current_x, current_y = pyautogui.position()
-            distance = (
-                (smooth_x - current_x) ** 2 + (smooth_y - current_y) ** 2
-            ) ** 0.5
-            if distance >= self.deadzone_pixels:
-                pyautogui.moveTo(
-                    round(smooth_x),
-                    round(smooth_y),
-                    duration=0,
-                )
+            dx, dy = smooth_x - current_x, smooth_y - current_y
+            distance = (dx * dx + dy * dy) ** 0.5
+            if distance < self.deadzone_pixels:
+                return "Cursor estável dentro da zona morta"
+            diagonal = max(1.0, (width * width + height * height) ** 0.5)
+            normalized_speed = min(1.0, distance / diagonal)
+            multiplier = self.speed * (1.0 + self.acceleration * normalized_speed)
+            pyautogui.moveTo(round(current_x + dx * multiplier),
+                             round(current_y + dy * multiplier), duration=0)
         except Exception as exc:
             raise RuntimeError(f"Falha ao mover o cursor: {exc}") from exc
-
         return "Cursor atualizado"
 
-    def click_left(self) -> str:
+    def click_left(self):
         if self.dry_run:
             return "Modo de teste: clique esquerdo seria executado"
         try:
@@ -100,7 +80,27 @@ class MouseController:
             raise RuntimeError(f"Falha ao clicar: {exc}") from exc
         return "Clique esquerdo executado"
 
-    def press_left(self) -> str:
+    def double_click_left(self):
+        if self.dry_run:
+            return "Modo de teste: clique duplo esquerdo seria executado"
+        try:
+            import pyautogui
+            pyautogui.doubleClick(button="left", interval=0.12)
+        except Exception as exc:
+            raise RuntimeError(f"Falha no clique duplo: {exc}") from exc
+        return "Clique duplo esquerdo executado"
+
+    def click_right(self):
+        if self.dry_run:
+            return "Modo de teste: clique direito seria executado"
+        try:
+            import pyautogui
+            pyautogui.click(button="right")
+        except Exception as exc:
+            raise RuntimeError(f"Falha ao clicar com botão direito: {exc}") from exc
+        return "Clique direito executado"
+
+    def press_left(self):
         if self._left_button_down:
             return "Botão esquerdo já pressionado"
         if self.dry_run:
@@ -114,7 +114,7 @@ class MouseController:
             raise RuntimeError(f"Falha ao iniciar arraste: {exc}") from exc
         return "Arraste iniciado"
 
-    def release_left(self) -> str:
+    def release_left(self):
         if not self._left_button_down:
             return "Botão esquerdo já liberado"
         try:
@@ -126,24 +126,16 @@ class MouseController:
         self._left_button_down = False
         return "Arraste finalizado" if not self.dry_run else "Modo de teste: arraste finalizado"
 
-    def execute(self, action: str) -> str:
+    def execute(self, action):
         ticks = SCROLL_TICKS.get(action)
         if ticks is None:
             raise ValueError(f"Ação de mouse não permitida: {action}")
-
         direction = "para cima" if ticks > 0 else "para baixo"
         if self.dry_run:
-            return (
-                "Modo de teste: 1 passo de rolagem "
-                f"{direction} seria executado"
-            )
-
+            return f"Modo de teste: 1 passo de rolagem {direction} seria executado"
         try:
             import pyautogui
             pyautogui.scroll(ticks)
         except Exception as exc:
-            raise RuntimeError(
-                f"Falha ao executar '{action}': {exc}"
-            ) from exc
-
+            raise RuntimeError(f"Falha ao executar '{action}': {exc}") from exc
         return f"1 passo de rolagem {direction} executado"

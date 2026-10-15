@@ -11,6 +11,9 @@
   "zoom_repeat_seconds": 0.22,
   "cursor_smoothing": 0.32,
   "cursor_edge_margin": 0.12,
+  "cursor_speed": 1.0,
+  "cursor_acceleration": 0.0,
+  "cursor_deadzone_pixels": 1.5,
   "gestures": {
     "Polegar para cima": "enter",
     "Polegar para baixo": "esc",
@@ -21,6 +24,7 @@
     "Dois dedos para baixo": "scroll_down",
     "Pinça polegar-indicador": "zoom",
     "Toque polegar-médio": "left_click",
+    "Pinça polegar-anelar": "right_click",
     "Manter polegar-médio": "drag"
   },
   "profile_storage": "~/.pc-mao/profiles.json"

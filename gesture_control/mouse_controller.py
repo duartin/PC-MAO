@@ -1,9 +1,7 @@
-"""Allowlisted mouse wheel actions for gesture-controlled scrolling."""
 
-# Um passo por repetição deixa a rolagem contínua e mais controlável.
 SCROLL_TICKS = {
-    "scroll_up": 5,
-    "scroll_down": -5,
+    "scroll_up": 80,
+    "scroll_down": -80,
 }
 
 

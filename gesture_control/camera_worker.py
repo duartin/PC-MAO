@@ -9,6 +9,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 from .click_drag import ClickDragController
+from .gesture_hysteresis import GestureHysteresis
 from .keyboard_controller import KeyboardController
 from .mode_manager import ModeManager
 from .motion_recognizer import MotionRecognizer
@@ -24,6 +25,8 @@ class CameraWorker(QThread):
     status_changed = Signal(str)
     action_recorded = Signal(str, str, str)
     mode_changed = Signal(str)
+    gesture_feedback = Signal(str, float, str)
+    calibration_sample = Signal(float)
 
     GESTURE_STABILITY_SECONDS = 0.25
     SCROLL_REPEAT_SECONDS = 0.18
@@ -41,6 +44,7 @@ class CameraWorker(QThread):
         self.motion_sensitivity = self.profile["motion_sensitivity"]
         self._pause_lock = threading.Lock()
         self._paused = False
+        self._calibration_capture = False
         self._last_action_time = float("-inf")
 
     def set_paused(self, paused: bool) -> None:
@@ -50,6 +54,14 @@ class CameraWorker(QThread):
     def _is_paused(self) -> bool:
         with self._pause_lock:
             return self._paused
+
+    def set_calibration_capture(self, enabled: bool) -> None:
+        with self._pause_lock:
+            self._calibration_capture = bool(enabled)
+
+    def _is_calibration_capture(self) -> bool:
+        with self._pause_lock:
+            return self._calibration_capture
 
     def _dispatch(self, gesture_name, action, keyboard, mouse, now,
                   continuous=False):
@@ -64,7 +76,7 @@ class CameraWorker(QThread):
         else:
             result = keyboard.execute(action)
 
-        # Cursor, sustained scrolling and zoom are continuous interactions.
+        # Cursor and sustained scrolling are continuous interactions.
         if not continuous:
             self._last_action_time = now
 
@@ -109,7 +121,10 @@ class CameraWorker(QThread):
 
         self.status_changed.emit("Câmera ativa — processamento local.")
         hands_api = mp.solutions.hands
-        recognizer = HandGestureRecognizer()
+        recognizer = HandGestureRecognizer(
+            click_pinch_threshold=self.profile["click_pinch_threshold"]
+        )
+        gesture_hysteresis = GestureHysteresis(stable_seconds=0.10)
         mode_manager = ModeManager(initial_mode=ModeManager.MOUSE)
         pinch_zoom = PinchZoomRecognizer(
             min_interval=self.profile["zoom_repeat_seconds"]
@@ -134,8 +149,13 @@ class CameraWorker(QThread):
             speed=self.profile["cursor_speed"],
             acceleration=self.profile["cursor_acceleration"],
             deadzone_pixels=self.profile["cursor_deadzone_pixels"],
+            max_step_pixels=self.profile["cursor_max_step_pixels"],
+            scroll_ticks_per_step=self.profile["scroll_ticks_per_step"],
         )
-        click_drag = ClickDragController(mouse)
+        click_drag = ClickDragController(
+            mouse,
+            double_click_window_seconds=self.profile["double_click_window_seconds"],
+        )
         self.mode_changed.emit(mode_manager.mode)
         self.status_changed.emit(
             "Modo Mouse ativo. Para Atalhos: mão aberta-punho-mão aberta; "
@@ -166,7 +186,7 @@ class CameraWorker(QThread):
 
                     frame = cv2.flip(frame, 1)
                     if self._is_paused():
-                        self._record_mouse_event(click_drag.cancel())
+                        self._record_mouse_event(click_drag.cancel(clear_pending=True))
                         cv2.putText(
                             frame,
                             "PAUSADO",
@@ -180,7 +200,9 @@ class CameraWorker(QThread):
                         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         result = hands.process(rgb)
                         detected = None
+                        raw_detected = None
                         hand_landmarks = None
+                        now = time.monotonic()
 
                         if result.multi_hand_landmarks:
                             hand = result.multi_hand_landmarks[0]
@@ -190,9 +212,16 @@ class CameraWorker(QThread):
                                 hand,
                                 hands_api.HAND_CONNECTIONS,
                             )
-                            detected = recognizer.recognize(hand_landmarks)
+                            raw_detected = recognizer.recognize(hand_landmarks)
 
-                        now = time.monotonic()
+                        calibrating = self._is_calibration_capture()
+                        if calibrating:
+                            ratio = recognizer.middle_pinch_ratio(hand_landmarks)
+                            if ratio is not None:
+                                self.calibration_sample.emit(ratio)
+                            gesture_hysteresis.reset()
+                        else:
+                            detected = gesture_hysteresis.update(raw_detected, now)
                         changed_mode = mode_manager.update(detected, now)
                         if changed_mode:
                             self.mode_changed.emit(changed_mode)
@@ -211,10 +240,11 @@ class CameraWorker(QThread):
                             )
                         )
                         action = getattr(detected, "action", None)
-                        if detected is not None:
+                        feedback_gesture = detected or raw_detected
+                        if feedback_gesture is not None:
                             cv2.putText(
                                 frame,
-                                f"{detected.name}  {detected.confidence:.0%}",
+                                f"{feedback_gesture.name}  {feedback_gesture.confidence:.0%}",
                                 (18, 34),
                                 cv2.FONT_HERSHEY_SIMPLEX,
                                 0.62,
@@ -243,7 +273,6 @@ class CameraWorker(QThread):
                             "esc",
                             "cursor",
                             "click_drag",
-                            "pinch",
                             "scroll_up",
                             "scroll_down",
                             "right_click",
@@ -252,13 +281,14 @@ class CameraWorker(QThread):
 
                         # A missing hand, a mode switch or a different gesture
                         # cancels click candidates; a drag always releases.
-                        if (
+                        if calibrating or (
                             mode_manager.mode != ModeManager.MOUSE
-                            or hand_landmarks is None
                             or is_mode_pose
                             or (action not in (None, "cursor", "click_drag"))
                         ):
-                            click_event = click_drag.cancel()
+                            click_event = click_drag.cancel(clear_pending=True)
+                        elif hand_landmarks is None:
+                            click_event = click_drag.update(False, None, now)
                         elif action == "click_drag":
                             index_tip = hand_landmarks[8]
                             click_event = click_drag.update(
@@ -287,7 +317,7 @@ class CameraWorker(QThread):
                             scroll_candidate = None
                             safety.suppress_until_neutral()
 
-                        # Thumb-middle pinch: short tap clicks; hold drags.
+                        # Thumb-index pinch: short tap clicks; hold drags.
                         elif action == "click_drag":
                             scroll_candidate = None
                             safety.suppress_until_neutral()
@@ -424,6 +454,40 @@ class CameraWorker(QThread):
                                 scroll_candidate = None
                                 safety.update(None, now)
 
+                        if calibrating:
+                            gesture_state = "Calibrando — comandos temporariamente bloqueados"
+                        elif hand_landmarks is None:
+                            gesture_state = "Mão não detectada"
+                        elif raw_detected is not None and detected is None:
+                            gesture_state = "Confirmando estabilidade do gesto"
+                        elif action == "cursor":
+                            gesture_state = "Cursor ativo — rastreando indicador"
+                        elif action == "click_drag":
+                            gesture_state = click_drag.state(now)
+                        elif action in ("scroll_up", "scroll_down"):
+                            elapsed = now - scroll_candidate_since if scroll_candidate == action else 0.0
+                            if elapsed >= self.GESTURE_STABILITY_SECONDS:
+                                ticks = self.profile["scroll_ticks_per_step"]
+                                signed_ticks = ticks if action == "scroll_up" else -ticks
+                                gesture_state = f"Rolando {signed_ticks:+.0f} ticks/passo"
+                            else:
+                                gesture_state = "Estabilizando pose de rolagem"
+                        elif action == "pinch":
+                            gesture_state = "Pinça de zoom detectada"
+                        elif action == "right_click":
+                            gesture_state = "Estabilizando clique direito"
+                        elif is_mode_pose:
+                            gesture_state = "Sequência de troca de modo"
+                        elif detected is not None:
+                            gesture_state = f"Gesto ativo: {detected.name}"
+                        else:
+                            gesture_state = "Aguardando gesto"
+                        self.gesture_feedback.emit(
+                            feedback_gesture.name if feedback_gesture else "Nenhum",
+                            feedback_gesture.confidence if feedback_gesture else 0.0,
+                            gesture_state,
+                        )
+
                     height, width = frame.shape[:2]
                     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     image = QImage(
@@ -440,6 +504,7 @@ class CameraWorker(QThread):
         finally:
             try:
                 self._record_mouse_event(click_drag.cancel())
+                self._record_mouse_event(click_drag.flush_pending())
             except Exception as exc:
                 self.status_changed.emit(
                     f"Falha ao liberar o botão após arraste: {exc}"

@@ -24,8 +24,8 @@
     "Dois dedos para baixo": "scroll_down",
     "Pinça polegar-indicador": "zoom",
     "Toque polegar-médio": "left_click",
-    "Pinça polegar-anelar": "right_click",
-    "Manter polegar-médio": "drag"
+    "Manter polegar-médio": "drag",
+    "Pinça polegar-anelar": "right_click"
   },
   "profile_storage": "~/.pc-mao/profiles.json"
 }

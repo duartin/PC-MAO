@@ -21,8 +21,12 @@ class Gesture:
 class HandGestureRecognizer:
     """Recognizes only broad, separable poses; ambiguous letter shapes are omitted."""
 
-    def __init__(self, min_confidence: float = 0.78):
+    def __init__(self, min_confidence: float = 0.78,
+                 click_pinch_threshold: float = 0.32):
+        if not 0.12 <= click_pinch_threshold <= 0.60:
+            raise ValueError("O limiar da pinça precisa ficar entre 0,12 e 0,60")
         self.min_confidence = min_confidence
+        self.click_pinch_threshold = float(click_pinch_threshold)
 
     @staticmethod
     def _finger_extended(points: Sequence, tip: int, pip: int, mcp: int) -> bool:
@@ -46,6 +50,18 @@ class HandGestureRecognizer:
                           points[INDEX_MCP].y - points[PINKY_MCP].y)
 
     @classmethod
+    def middle_pinch_ratio(cls, points):
+        """Return thumb-middle distance normalized by palm width, or None."""
+        if points is None or len(points) < 21:
+            return None
+        palm_width = cls._palm_width(points)
+        if palm_width < 0.025:
+            return None
+        gap = math.hypot(points[THUMB_TIP].x - points[MIDDLE_TIP].x,
+                         points[THUMB_TIP].y - points[MIDDLE_TIP].y)
+        return gap / palm_width
+
+    @classmethod
     def _pinch_pose(cls, points: Sequence) -> bool:
         palm_width = cls._palm_width(points)
         if palm_width < 0.025:
@@ -57,7 +73,8 @@ class HandGestureRecognizer:
         return gap / palm_width < 0.60 and index_reach / palm_width > 0.55
 
     @classmethod
-    def _middle_pinch_pose(cls, points: Sequence, extended, extended_down) -> bool:
+    def _middle_pinch_pose(cls, points: Sequence, extended, extended_down,
+                           threshold=0.32) -> bool:
         palm_width = cls._palm_width(points)
         if palm_width < 0.025 or not extended[0]:
             return False
@@ -67,7 +84,7 @@ class HandGestureRecognizer:
                                  points[INDEX_TIP].y - points[INDEX_MCP].y)
         middle_curled = not extended[1] and not extended_down[1]
         ring_and_pinky_curled = not any(extended[2:]) and not any(extended_down[2:])
-        return (gap / palm_width < 0.32 and index_reach / palm_width > 0.55
+        return (gap / palm_width < threshold and index_reach / palm_width > 0.55
                 and middle_curled and ring_and_pinky_curled)
 
     @classmethod
@@ -116,7 +133,9 @@ class HandGestureRecognizer:
             return Gesture("Pinça", "pinch", 0.90)
         if self._ring_pinch_pose(points, extended, extended_down):
             return Gesture("Pinça polegar-anelar", "right_click", 0.90)
-        if self._middle_pinch_pose(points, extended, extended_down):
+        if self._middle_pinch_pose(
+            points, extended, extended_down, self.click_pinch_threshold
+        ):
             return Gesture("Pinça polegar-médio", "click_drag", 0.90)
         if extended[0] and not any(extended[1:]) and not any(extended_down[1:]):
             return Gesture("Indicador apontado", "cursor", 0.90)

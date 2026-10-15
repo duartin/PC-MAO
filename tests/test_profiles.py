@@ -9,6 +9,7 @@ def test_missing_profile_file_has_safe_default(tmp_path):
     manager = ProfileManager(tmp_path / "profiles.json")
     assert manager.names() == ["Default"]
     assert manager.load("Default") == DEFAULT_PROFILE
+    assert manager.load("Default")["scroll_ticks_per_step"] == 80.0
 
 
 def test_profile_can_be_saved_and_reloaded_with_custom_mapping(tmp_path):
@@ -43,6 +44,14 @@ def test_profile_rejects_unsafe_shortcut_and_out_of_range_values(tmp_path):
     profile["mappings"]["thumb_up"] = "enter"
     profile["cursor_speed"] = 8
     with pytest.raises(ValueError, match="cursor_speed"):
+        manager.save("Invalid", profile)
+    profile["cursor_speed"] = 1.0
+    profile["scroll_ticks_per_step"] = 250
+    with pytest.raises(ValueError, match="scroll_ticks_per_step"):
+        manager.save("Invalid", profile)
+    profile["scroll_ticks_per_step"] = 80
+    profile["click_pinch_threshold"] = 0.9
+    with pytest.raises(ValueError, match="click_pinch_threshold"):
         manager.save("Invalid", profile)
 
 

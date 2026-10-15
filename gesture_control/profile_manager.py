@@ -14,8 +14,12 @@ DEFAULT_PROFILE = {
     "cursor_speed": 1.0,
     "cursor_acceleration": 0.0,
     "cursor_deadzone_pixels": 1.5,
+    "cursor_max_step_pixels": 120.0,
     "scroll_repeat_seconds": 0.18,
+    "scroll_ticks_per_step": 80.0,
     "zoom_repeat_seconds": 0.22,
+    "click_pinch_threshold": 0.32,
+    "double_click_window_seconds": 0.32,
     "action_switch_delay_seconds": 1.5,
     "mappings": {
         "thumb_up": "enter",
@@ -32,8 +36,12 @@ NUMERIC_LIMITS = {
     "cursor_speed": (0.5, 2.0),
     "cursor_acceleration": (0.0, 1.5),
     "cursor_deadzone_pixels": (0.0, 12.0),
+    "cursor_max_step_pixels": (20.0, 300.0),
     "scroll_repeat_seconds": (0.08, 0.50),
+    "scroll_ticks_per_step": (10.0, 160.0),
     "zoom_repeat_seconds": (0.10, 0.60),
+    "click_pinch_threshold": (0.12, 0.60),
+    "double_click_window_seconds": (0.20, 0.60),
     "action_switch_delay_seconds": (0.5, 3.0),
 }
 MAPPING_KEYS = tuple(DEFAULT_PROFILE["mappings"])

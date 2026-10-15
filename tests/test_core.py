@@ -1,5 +1,7 @@
 from types import SimpleNamespace as P
 
+import pytest
+
 from gesture_control.keyboard_controller import KeyboardController
 from gesture_control.mouse_controller import MouseController
 from gesture_control.recognizer import HandGestureRecognizer
@@ -45,8 +47,6 @@ def test_shortcut_controller_is_dry_run_by_default_and_rejects_unknown_actions()
     assert "Modo de teste" in controller.execute("ctrl+s")
     assert "alt+left" in controller.execute("alt+left")
     assert "alt+right" in controller.execute("alt+right")
-    assert "zoom_in" in controller.execute("zoom_in")
-    assert "zoom_out" in controller.execute("zoom_out")
     try:
         controller.execute("delete-all")
     except ValueError:
@@ -88,11 +88,24 @@ def test_action_is_not_delayed_at_start_but_next_action_waits_for_cooldown():
     assert safety.update(gesture, 1.75) == gesture
 
 
-def test_mouse_scroll_is_one_step_and_dry_run_by_default():
+def test_mouse_scroll_uses_eighty_ticks_and_dry_run_by_default():
     controller = MouseController()
     result = controller.execute("scroll_down")
-    assert "1 passo" in result
+    assert "-80" in result
     assert "Modo de teste" in result
+    assert controller.execute("scroll_up").find("+80") >= 0
+    faster = MouseController(scroll_ticks_per_step=130)
+    assert "+130" in faster.execute("scroll_up")
+    assert "-130" in faster.execute("scroll_down")
+
+
+def test_adaptive_cursor_scales_velocity_slows_at_edges_and_caps_step():
+    slow = MouseController.adaptive_delta(100, 0, 0.0, speed=1.0, acceleration=1.0, max_step=500)
+    fast = MouseController.adaptive_delta(100, 0, 0.8, speed=1.0, acceleration=1.0, max_step=500)
+    assert fast[0] > slow[0]
+    assert MouseController._edge_factor(0, 400, 1000, 800) < MouseController._edge_factor(500, 400, 1000, 800)
+    capped = MouseController.adaptive_delta(1000, 0, 10, max_step=90)
+    assert capped[0] == 90
 
 
 def test_cursor_mapping_uses_safe_inner_area_and_clamps_edges():
@@ -110,7 +123,17 @@ def test_cursor_moves_without_real_execution_in_dry_run():
     assert "0.50" in result
 
 
-def test_thumb_middle_pinch_has_separate_click_drag_action():
+def test_thumb_index_pinch_remains_reserved_for_zoom():
+    points = [P(x=0.5, y=0.5) for _ in range(21)]
+    points[5] = P(x=0.4, y=0.5)
+    points[17] = P(x=0.6, y=0.5)
+    points[8] = P(x=0.5, y=0.25)
+    points[4] = P(x=0.54, y=0.25)
+    gesture = HandGestureRecognizer().recognize(points)
+    assert gesture.action == "pinch"
+
+
+def test_thumb_middle_pinch_is_the_click_drag_pose():
     points = [P(x=0.5, y=0.5) for _ in range(21)]
     points[5] = P(x=0.40, y=0.55)
     points[17] = P(x=0.60, y=0.55)
@@ -120,8 +143,24 @@ def test_thumb_middle_pinch_has_separate_click_drag_action():
     points[10] = P(x=0.48, y=0.52)
     points[9] = P(x=0.48, y=0.55)
     points[4] = P(x=0.50, y=0.60)
-    gesture = HandGestureRecognizer().recognize(points)
-    assert gesture.action == "click_drag"
+    assert HandGestureRecognizer().recognize(points).action == "click_drag"
+
+
+def test_calibrated_pinch_threshold_is_applied_and_distance_is_normalized():
+    points = [P(x=0.5, y=0.5) for _ in range(21)]
+    points[5] = P(x=0.40, y=0.55)
+    points[17] = P(x=0.60, y=0.55)
+    points[8] = P(x=0.40, y=0.30)
+    points[6] = P(x=0.40, y=0.40)
+    points[12] = P(x=0.50, y=0.60)
+    points[10] = P(x=0.48, y=0.52)
+    points[9] = P(x=0.48, y=0.55)
+    points[4] = P(x=0.50, y=0.55)
+    ratio = HandGestureRecognizer.middle_pinch_ratio(points)
+    assert ratio == pytest.approx(0.25)
+    low_threshold_gesture = HandGestureRecognizer(click_pinch_threshold=0.20).recognize(points)
+    assert low_threshold_gesture.action != "click_drag"
+    assert HandGestureRecognizer(click_pinch_threshold=0.32).recognize(points).action == "click_drag"
 
 
 def test_mouse_click_and_drag_buttons_are_simulated_by_default():
@@ -148,6 +187,7 @@ def test_mouse_cursor_controls_reject_unsafe_settings():
 
 def test_thumb_ring_pinch_is_a_distinct_right_click_pose():
     points = landmarks((8, 12))
+    points[5] = P(x=0.40, y=0.55)
     points[17] = P(x=0.60, y=0.55)
     points[18] = P(x=0.58, y=0.52)
     points[20] = P(x=0.58, y=0.60)

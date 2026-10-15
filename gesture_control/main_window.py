@@ -1,10 +1,10 @@
 """PySide6 interface with profiles, calibration, feedback and mouse controls."""
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QInputDialog, QLabel, QListWidget, QMainWindow, QMessageBox,
-    QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget,
+    QPushButton, QProgressBar, QScrollArea, QSlider, QVBoxLayout, QWidget,
 )
 
 from .camera_worker import CameraWorker
@@ -20,6 +20,9 @@ class MainWindow(QMainWindow):
         self.profile_manager = ProfileManager()
         self.worker = None
         self.profile_error = None
+        self._calibration_phase = None
+        self._pinch_samples = []
+        self._neutral_samples = []
         try:
             self.profile_names = self.profile_manager.names()
         except ValueError as exc:
@@ -84,8 +87,19 @@ class MainWindow(QMainWindow):
         self.status = QLabel("Pronto. Inicie a câmera para começar.")
         self.status.setWordWrap(True)
         self.status.setObjectName("status")
+        self.gesture_label = QLabel("Gesto: nenhum")
+        self.gesture_state_label = QLabel("Estado: aguardando mão")
+        self.confidence_label = QLabel("Compatibilidade da pose: 0%")
+        self.confidence_bar = QProgressBar()
+        self.confidence_bar.setRange(0, 100)
+        self.confidence_bar.setValue(0)
+        self.confidence_bar.setTextVisible(False)
         mode_layout.addWidget(self.mode_label)
         mode_layout.addWidget(self.status)
+        mode_layout.addWidget(self.gesture_label)
+        mode_layout.addWidget(self.gesture_state_label)
+        mode_layout.addWidget(self.confidence_label)
+        mode_layout.addWidget(self.confidence_bar)
         side.addWidget(mode_group)
         self.execute_checkbox = QCheckBox("Executar ações reais no computador")
         self.execute_checkbox.setChecked(execute_default)
@@ -109,8 +123,12 @@ class MainWindow(QMainWindow):
         self._add_slider(form, "Velocidade do cursor", "cursor_speed", 5, 20, 10, "{:.1f}×")
         self._add_slider(form, "Aceleração do cursor", "cursor_acceleration", 0, 15, 10, "{:.1f}")
         self._add_slider(form, "Zona morta do cursor (px)", "cursor_deadzone_pixels", 0, 12, 1, "{:.0f} px")
+        self._add_slider(form, "Passo máximo do cursor (px/quadro)", "cursor_max_step_pixels", 20, 300, 1, "{:.0f} px")
         self._add_slider(form, "Intervalo de rolagem (s)", "scroll_repeat_seconds", 8, 50, 100, "{:.2f} s")
+        self._add_slider(form, "Intensidade do scroll (ticks/passo)", "scroll_ticks_per_step", 10, 160, 1, "{:.0f}")
         self._add_slider(form, "Intervalo do zoom (s)", "zoom_repeat_seconds", 10, 60, 100, "{:.2f} s")
+        self._add_slider(form, "Limiar pinça polegar+médio", "click_pinch_threshold", 12, 60, 100, "{:.2f}")
+        self._add_slider(form, "Janela do duplo clique (s)", "double_click_window_seconds", 20, 60, 100, "{:.2f} s")
         self._add_slider(form, "Intervalo entre ações (s)", "action_switch_delay_seconds", 5, 30, 10, "{:.1f} s")
 
         mapping_group = QGroupBox("Mapeamentos dos atalhos")
@@ -151,9 +169,14 @@ class MainWindow(QMainWindow):
         calibration_note.setWordWrap(True)
         calibration_note.setObjectName("note")
         side.addWidget(calibration_note)
-        self.calibrate_button = QPushButton("Assistente de calibração")
+        self.calibrate_button = QPushButton("Calibrar pinça de clique")
+        self.calibrate_button.setEnabled(False)
         self.calibrate_button.clicked.connect(self._calibration_wizard)
         side.addWidget(self.calibrate_button)
+        calibration_note = QLabel("O assistente coleta a pinça polegar–médio e, em seguida, a mão relaxada. Depois, revise a área do cursor e salve o perfil.")
+        calibration_note.setWordWrap(True)
+        calibration_note.setObjectName("note")
+        side.addWidget(calibration_note)
 
         history_group = QGroupBox("HISTÓRICO DE AÇÕES")
         history_layout = QVBoxLayout(history_group)
@@ -178,11 +201,11 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.start_button)
         controls.addWidget(self.pause_button)
         controls.addWidget(self.stop_button)
-        footer = QLabel("Mouse: indicador move; dois dedos rolam; polegar+indicador ajustam zoom; toque polegar+médio clica; segurar arrasta. Duas pinças rápidas fazem duplo clique. Use polegar+anelar para clique direito. Atalhos: mão aberta-punho-mão aberta; retorno ao Mouse: punho-mão aberta-punho-mão aberta.")
+        footer = QLabel("Mouse: indicador move; dois dedos rolam; polegar+indicador ajustam zoom; toque rápido polegar+médio clica e segurar inicia arraste. Atalhos: mão aberta-punho-mão aberta; para voltar a Mouse: punho-mão aberta-punho-mão aberta.")
         footer.setWordWrap(True)
         footer.setObjectName("note")
         page.addWidget(footer)
-        self._profile_widgets.extend([self.profile_combo, self.save_profile_button, self.new_profile_button, self.rename_profile_button, self.delete_profile_button, self.export_profile_button, self.import_profile_button, self.calibrate_button])
+        self._profile_widgets.extend([self.profile_combo, self.save_profile_button, self.new_profile_button, self.rename_profile_button, self.delete_profile_button, self.export_profile_button, self.import_profile_button])
 
     def _add_slider(self, form, label, key, minimum, maximum, scale, template, percent=False):
         row = QWidget()
@@ -205,7 +228,9 @@ class MainWindow(QMainWindow):
     def _profile_from_controls(self):
         scales = {"motion_sensitivity": 10, "cursor_smoothing": 100, "cursor_margin": 100,
                   "cursor_speed": 10, "cursor_acceleration": 10, "cursor_deadzone_pixels": 1,
-                  "scroll_repeat_seconds": 100, "zoom_repeat_seconds": 100,
+                  "cursor_max_step_pixels": 1, "scroll_repeat_seconds": 100,
+                  "scroll_ticks_per_step": 1, "zoom_repeat_seconds": 100,
+                  "click_pinch_threshold": 100, "double_click_window_seconds": 100,
                   "action_switch_delay_seconds": 10}
         profile = {key: slider.value() / scales[key] for key, slider in self.profile_sliders.items()}
         profile["mappings"] = {key: combo.currentData() for key, combo in self.mapping_combos.items()}
@@ -214,7 +239,9 @@ class MainWindow(QMainWindow):
     def _set_profile_controls(self, profile):
         scales = {"motion_sensitivity": 10, "cursor_smoothing": 100, "cursor_margin": 100,
                   "cursor_speed": 10, "cursor_acceleration": 10, "cursor_deadzone_pixels": 1,
-                  "scroll_repeat_seconds": 100, "zoom_repeat_seconds": 100,
+                  "cursor_max_step_pixels": 1, "scroll_repeat_seconds": 100,
+                  "scroll_ticks_per_step": 1, "zoom_repeat_seconds": 100,
+                  "click_pinch_threshold": 100, "double_click_window_seconds": 100,
                   "action_switch_delay_seconds": 10}
         for key, slider in self.profile_sliders.items():
             slider.setValue(round(profile[key] * scales[key]))
@@ -330,16 +357,69 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Falha ao importar: {exc}")
 
     def _calibration_wizard(self):
-        text = (
-            "Assistente de calibração\n\n"
-            "1. Sente-se na posição em que usará a webcam e mantenha a mão visível.\n"
-            "2. Com a câmera ativa, mova o indicador até os extremos confortáveis da área.\n"
-            "3. Ajuste a margem até a moldura rosa incluir esses pontos sem exigir esforço.\n"
-            "4. Confira cursor no centro e nas quatro bordas; aumente suavização se houver tremor.\n"
-            "5. Clique em Salvar para guardar a calibração no perfil.\n\n"
-            "Margem menor = maior área do cursor; margem maior = zona mais restrita."
-        )
-        QMessageBox.information(self, "Calibração guiada", text)
+        if self.worker is None or not self.worker.isRunning():
+            self.status.setText("Inicie a câmera antes de calibrar o gesto de clique.")
+            return
+        if self._calibration_phase is not None:
+            self.status.setText("A calibração já está em andamento.")
+            return
+        self._pinch_samples = []
+        self._neutral_samples = []
+        self._begin_calibration_capture("pinch")
+
+    def _begin_calibration_capture(self, phase):
+        if self.worker is None or not self.worker.isRunning():
+            self._calibration_phase = None
+            self.status.setText("Calibração cancelada: câmera não está ativa.")
+            return
+        self._calibration_phase = phase
+        self.worker.set_calibration_capture(True)
+        if phase == "pinch":
+            self.status.setText("CALIBRAÇÃO 1/2 — mantenha polegar e médio encostados por 2,5 s.")
+        else:
+            self.status.setText("CALIBRAÇÃO 2/2 — relaxe a mão e afaste os dedos por 2,5 s.")
+        QTimer.singleShot(2500, lambda current=phase: self._finish_calibration_capture(current))
+
+    def _finish_calibration_capture(self, phase):
+        if self._calibration_phase != phase:
+            return
+        self.worker.set_calibration_capture(False)
+        self._calibration_phase = None
+        samples = self._pinch_samples if phase == "pinch" else self._neutral_samples
+        if len(samples) < 10:
+            self.status.setText("Poucas amostras. Mantenha a mão bem visível e tente novamente.")
+            return
+        if phase == "pinch":
+            self.status.setText("Agora afaste o polegar do médio e mantenha a mão relaxada.")
+            QTimer.singleShot(900, lambda: self._begin_calibration_capture("neutral"))
+            return
+        from .gesture_calibration import estimate_pinch_threshold
+        try:
+            threshold = estimate_pinch_threshold(
+                self._pinch_samples,
+                self._neutral_samples,
+            )
+            self.profile["click_pinch_threshold"] = threshold
+            self.profile_sliders["click_pinch_threshold"].setValue(round(threshold * 100))
+            self.status.setText(
+                f"Calibração concluída: limiar {threshold:.2f}. "
+                "Teste a pinça e clique em Salvar para guardar no perfil."
+            )
+        except ValueError as exc:
+            self.status.setText(f"Calibração não concluída: {exc}")
+
+    def _collect_calibration_sample(self, value):
+        if self._calibration_phase == "pinch":
+            self._pinch_samples.append(value)
+        elif self._calibration_phase == "neutral":
+            self._neutral_samples.append(value)
+
+    def _update_gesture_feedback(self, name, confidence, state):
+        self.gesture_label.setText(f"Gesto: {name}")
+        self.gesture_state_label.setText(f"Estado: {state}")
+        percent = max(0, min(100, int(round(confidence * 100))))
+        self.confidence_label.setText(f"Compatibilidade geométrica da pose: {percent}%")
+        self.confidence_bar.setValue(percent)
 
     def _apply_style(self):
         self.setStyleSheet("""
@@ -385,6 +465,8 @@ class MainWindow(QMainWindow):
                                    profile=profile, parent=self)
         self.worker.frame_ready.connect(self._show_frame)
         self.worker.status_changed.connect(self.status.setText)
+        self.worker.gesture_feedback.connect(self._update_gesture_feedback)
+        self.worker.calibration_sample.connect(self._collect_calibration_sample)
         self.worker.action_recorded.connect(self._add_history)
         self.worker.mode_changed.connect(self._update_mode_label)
         self.worker.finished.connect(self._worker_finished)
@@ -394,6 +476,7 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(True)
         self.execute_checkbox.setEnabled(False)
         self._set_profile_controls_enabled(False)
+        self.calibrate_button.setEnabled(True)
         self.pause_button.setText("Pausar")
 
     def stop_camera(self):
@@ -424,11 +507,15 @@ class MainWindow(QMainWindow):
             self.history.takeItem(self.history.count() - 1)
 
     def _worker_finished(self):
+        if self.worker is not None:
+            self.worker.set_calibration_capture(False)
+        self._calibration_phase = None
         self.start_button.setEnabled(True)
         self.pause_button.setEnabled(False)
         self.stop_button.setEnabled(False)
         self.execute_checkbox.setEnabled(True)
         self._set_profile_controls_enabled(True)
+        self.calibrate_button.setEnabled(False)
         self.pause_button.setText("Pausar")
         self.video.clear()
         self.video.setText("Câmera desligada")

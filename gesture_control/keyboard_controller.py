@@ -6,6 +6,8 @@ SHORTCUTS = {
     "space": ("space",),
     "ctrl+s": ("ctrl", "s"),
     "alt+tab": ("alt", "tab"),
+    "alt+left": ("alt", "left"),
+    "alt+right": ("alt", "right"),
 }
 
 

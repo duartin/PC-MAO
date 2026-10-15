@@ -21,6 +21,12 @@ class SafetyManager:
         self._armed = True
         self._last_action = float("-inf")
 
+    def suppress_until_neutral(self) -> None:
+        """Prevent a swipe from also firing a static-pose shortcut."""
+        self._candidate = None
+        self._neutral_since = None
+        self._armed = False
+
     def update(self, gesture: Optional[Gesture], now: float) -> Optional[Gesture]:
         if gesture is None or gesture.confidence < self.settings.min_confidence:
             self._candidate = None

@@ -6,6 +6,8 @@ import cv2
 import mediapipe as mp
 
 from .keyboard_controller import KeyboardController
+from .motion_recognizer import MotionRecognizer
+from .mouse_controller import MouseController
 from .recognizer import HandGestureRecognizer
 from .safety_manager import SafetyManager
 
@@ -18,12 +20,15 @@ def run(camera_index: int = 0, execute: bool = False) -> int:
 
     hands_api = mp.solutions.hands
     recognizer = HandGestureRecognizer()
+    motion_recognizer = MotionRecognizer()
     safety = SafetyManager()
     keyboard = KeyboardController(dry_run=not execute)
+    mouse = MouseController(dry_run=not execute)
     last_message = "Aguardando uma mão..."
     print("Câmera ativa. Pressione Q para sair; P pausa/retoma.")
-    print("Modo de teste ativo: nenhum atalho será enviado." if not execute else
-          "EXECUÇÃO ATIVA: gestos enviarão atalhos ao sistema.")
+    print("Deslize para cima/baixo para rolar e esquerda/direita para navegar.")
+    print("Modo de teste ativo: nenhuma ação será enviada." if not execute else
+          "EXECUÇÃO ATIVA: gestos enviarão teclas e rolagem ao sistema.")
     if execute:
         print("Mantenha Q/Esc acessível para interromper imediatamente.")
 
@@ -46,20 +51,34 @@ def run(camera_index: int = 0, execute: bool = False) -> int:
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     result = hands.process(rgb)
                     detected = None
+                    hand_landmarks = None
                     if result.multi_hand_landmarks:
                         hand = result.multi_hand_landmarks[0]
+                        hand_landmarks = hand.landmark
                         mp.solutions.drawing_utils.draw_landmarks(
                             frame, hand, hands_api.HAND_CONNECTIONS
                         )
-                        detected = recognizer.recognize(hand.landmark)
-                    confirmed = safety.update(detected, time.monotonic())
-                    if confirmed:
-                        last_message = f"{confirmed.name} → {keyboard.execute(confirmed.action)}"
+                        detected = recognizer.recognize(hand_landmarks)
+                    now = time.monotonic()
+                    motion = motion_recognizer.update(hand_landmarks, now)
+                    if motion:
+                        safety.suppress_until_neutral()
+                        if motion.action.startswith("scroll_"):
+                            response = mouse.execute(motion.action)
+                        else:
+                            shortcut = "alt+right" if motion.action == "page_forward" else "alt+left"
+                            response = keyboard.execute(shortcut)
+                        last_message = f"{motion.name} → {response}"
                         print(last_message)
-                    elif detected:
-                        last_message = f"Candidato: {detected.name} ({detected.confidence:.0%}) — mantenha"
                     else:
-                        last_message = "Mão não reconhecida com segurança — estado neutro"
+                        confirmed = safety.update(detected, now)
+                        if confirmed:
+                            last_message = f"{confirmed.name} → {keyboard.execute(confirmed.action)}"
+                            print(last_message)
+                        elif detected:
+                            last_message = f"Candidato: {detected.name} ({detected.confidence:.0%}) — mantenha"
+                        else:
+                            last_message = "Mão não reconhecida com segurança — estado neutro"
 
                 cv2.putText(frame, "PAUSADO" if paused else "ATIVO", (18, 32),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (40, 200, 40), 2)
@@ -73,6 +92,8 @@ def run(camera_index: int = 0, execute: bool = False) -> int:
                     break
                 if key == ord("p"):
                     paused = not paused
+                    motion_recognizer.reset()
+                    safety.suppress_until_neutral()
                     last_message = "Reconhecimento pausado" if paused else "Reconhecimento retomado"
         except KeyboardInterrupt:
             pass

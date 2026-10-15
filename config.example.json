@@ -9,6 +9,7 @@
     "Polegar para baixo": "esc",
     "Mão aberta": "space",
     "Punho fechado": "ctrl+s",
-    "Dois dedos": "alt+tab"
+    "Dois dedos para cima": "scroll_up",
+    "Dois dedos para baixo": "scroll_down"
   }
 }

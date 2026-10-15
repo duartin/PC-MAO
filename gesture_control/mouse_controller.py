@@ -1,6 +1,10 @@
-"""Allowlisted mouse wheel actions."""
+"""Allowlisted mouse wheel actions for gesture-controlled scrolling."""
 
-SCROLL_TICKS = {"scroll_up": 4, "scroll_down": -4}
+# Um passo por repetição deixa a rolagem contínua e mais controlável.
+SCROLL_TICKS = {
+    "scroll_up": 5,
+    "scroll_down": -5,
+}
 
 
 class MouseController:
@@ -11,11 +15,21 @@ class MouseController:
         ticks = SCROLL_TICKS.get(action)
         if ticks is None:
             raise ValueError(f"Ação de mouse não permitida: {action}")
+
+        direction = "para cima" if ticks > 0 else "para baixo"
+
         if self.dry_run:
-            return f"Modo de teste: {action} ({ticks} passos) seria executado"
+            return (
+                "Modo de teste: 1 passo de rolagem "
+                f"{direction} seria executado"
+            )
+
         try:
             import pyautogui
             pyautogui.scroll(ticks)
         except Exception as exc:
-            raise RuntimeError(f"Falha ao executar '{action}': {exc}") from exc
-        return f"Rolagem executada: {action}"
+            raise RuntimeError(
+                f"Falha ao executar '{action}': {exc}"
+            ) from exc
+
+        return f"1 passo de rolagem {direction} executado"

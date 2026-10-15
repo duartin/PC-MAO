@@ -27,7 +27,23 @@ class HandGestureRecognizer:
     @staticmethod
     def _finger_extended(points: Sequence, tip: int, pip: int, mcp: int) -> bool:
         # In image coordinates, a non-thumb fingertip above its PIP is extended.
-        return points[tip].y < points[pip].y - 0.015 and points[pip].y < points[mcp].y + 0.04
+        return (
+            points[tip].y < points[pip].y - 0.015
+            and points[pip].y < points[mcp].y + 0.04
+        )
+
+    @staticmethod
+    def _finger_extended_down(
+        points: Sequence,
+        tip: int,
+        pip: int,
+        mcp: int,
+    ) -> bool:
+        # Image y grows downward; require both finger segments to point down.
+        return (
+            points[tip].y > points[pip].y + 0.045
+            and points[pip].y > points[mcp].y + 0.015
+        )
 
     @staticmethod
     def _thumb_sideways(points: Sequence) -> bool:
@@ -41,12 +57,29 @@ class HandGestureRecognizer:
         """Return the best known pose, or None when evidence is insufficient."""
         if len(points) < 21:
             return None
+
         extended = [
             self._finger_extended(points, INDEX_TIP, INDEX_PIP, INDEX_MCP),
             self._finger_extended(points, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP),
             self._finger_extended(points, RING_TIP, RING_PIP, RING_MCP),
             self._finger_extended(points, PINKY_TIP, PINKY_PIP, PINKY_MCP),
         ]
+
+        extended_down = [
+            self._finger_extended_down(
+                points, INDEX_TIP, INDEX_PIP, INDEX_MCP
+            ),
+            self._finger_extended_down(
+                points, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP
+            ),
+            self._finger_extended_down(
+                points, RING_TIP, RING_PIP, RING_MCP
+            ),
+            self._finger_extended_down(
+                points, PINKY_TIP, PINKY_PIP, PINKY_MCP
+            ),
+        ]
+
         count = sum(extended)
         thumb_y = points[THUMB_TIP].y - points[THUMB_IP].y
         thumb_vertical = self._thumb_vertical(points)
@@ -57,12 +90,19 @@ class HandGestureRecognizer:
                 return Gesture("Polegar para cima", "enter", 0.88)
             if thumb_y > 0.04:
                 return Gesture("Polegar para baixo", "esc", 0.88)
+
         if count == 4 and self._thumb_sideways(points):
             return Gesture("Mão aberta", "space", 0.90)
+
+        if extended[0] and extended[1] and not any(extended[2:]):
+            return Gesture("Dois dedos para cima", "scroll_up", 0.88)
+
+        if extended_down[0] and extended_down[1] and not any(extended_down[2:]):
+            return Gesture("Dois dedos para baixo", "scroll_down", 0.88)
+
         if count == 0 and not thumb_vertical:
             return Gesture("Punho fechado", "ctrl+s", 0.84)
-        if extended[0] and extended[1] and not extended[2] and not extended[3]:
-            return Gesture("Dois dedos", "alt+tab", 0.84)
+
         return None
 
     def confident(self, gesture: Optional[Gesture]) -> bool:

@@ -21,6 +21,7 @@ class CameraWorker(QThread):
     action_recorded = Signal(str, str, str)
 
     ACTION_DELAY_SECONDS = 1.5
+    SCROLL_REPEAT_SECONDS = 0.18
 
     def __init__(
         self,
@@ -45,9 +46,17 @@ class CameraWorker(QThread):
         with self._pause_lock:
             return self._paused
 
-    def _dispatch(self, gesture_name, action, keyboard, mouse, now):
+    def _dispatch(
+        self,
+        gesture_name,
+        action,
+        keyboard,
+        mouse,
+        now,
+        bypass_delay=False,
+    ):
         elapsed = now - self._last_action_time
-        if elapsed < self.ACTION_DELAY_SECONDS:
+        if not bypass_delay and elapsed < self.ACTION_DELAY_SECONDS:
             remaining = self.ACTION_DELAY_SECONDS - elapsed
             return f"Aguardando intervalo de segurança ({remaining:.1f}s)"
 
@@ -67,6 +76,7 @@ class CameraWorker(QThread):
 
     def run(self) -> None:
         cap = cv2.VideoCapture(self.camera_index)
+
         if not cap.isOpened():
             cap.release()
             self.status_changed.emit(
@@ -75,10 +85,12 @@ class CameraWorker(QThread):
             return
 
         self.status_changed.emit("Câmera ativa — processamento local.")
+
         hands_api = mp.solutions.hands
         recognizer = HandGestureRecognizer()
         motion_recognizer = MotionRecognizer(
-            sensitivity=self.motion_sensitivity
+            sensitivity=self.motion_sensitivity,
+            enable_vertical=False,
         )
         safety = SafetyManager(
             SafetySettings(
@@ -90,6 +102,9 @@ class CameraWorker(QThread):
         )
         keyboard = KeyboardController(dry_run=not self.execute_actions)
         mouse = MouseController(dry_run=not self.execute_actions)
+
+        scroll_candidate = None
+        scroll_candidate_since = 0.0
 
         try:
             with hands_api.Hands(
@@ -132,6 +147,7 @@ class CameraWorker(QThread):
                         )
 
                         if motion:
+                            scroll_candidate = None
                             safety.suppress_until_neutral()
                             response = self._dispatch(
                                 motion.name,
@@ -143,8 +159,49 @@ class CameraWorker(QThread):
                             self.status_changed.emit(
                                 f"{motion.name}: {response}"
                             )
+
+                        elif detected and detected.action in (
+                            "scroll_up",
+                            "scroll_down",
+                        ):
+                            safety.suppress_until_neutral()
+
+                            if detected.action != scroll_candidate:
+                                scroll_candidate = detected.action
+                                scroll_candidate_since = now
+
+                            stable_for = now - scroll_candidate_since
+                            repeat_elapsed = now - self._last_action_time
+
+                            if (
+                                stable_for >= self.ACTION_DELAY_SECONDS
+                                and repeat_elapsed >= self.SCROLL_REPEAT_SECONDS
+                            ):
+                                response = self._dispatch(
+                                    detected.name,
+                                    detected.action,
+                                    keyboard,
+                                    mouse,
+                                    now,
+                                    bypass_delay=True,
+                                )
+                                self.status_changed.emit(
+                                    f"{detected.name}: {response}"
+                                )
+                            else:
+                                remaining = max(
+                                    0.0,
+                                    self.ACTION_DELAY_SECONDS - stable_for,
+                                )
+                                self.status_changed.emit(
+                                    f"{detected.name} — mantenha; "
+                                    f"rolagem em {remaining:.1f}s"
+                                )
+
                         else:
+                            scroll_candidate = None
                             confirmed = safety.update(detected, now)
+
                             if confirmed:
                                 response = self._dispatch(
                                     confirmed.name,
@@ -185,7 +242,9 @@ class CameraWorker(QThread):
                     self.frame_ready.emit(image)
 
         except Exception as exc:
-            self.status_changed.emit(f"Falha no reconhecimento: {exc}")
+            self.status_changed.emit(
+                f"Falha no reconhecimento: {exc}"
+            )
         finally:
             cap.release()
             self.status_changed.emit("Câmera desligada.")

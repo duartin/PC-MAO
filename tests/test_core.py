@@ -1,11 +1,17 @@
 from types import SimpleNamespace as P
 
 from gesture_control.keyboard_controller import KeyboardController
+from gesture_control.mouse_controller import MouseController
 from gesture_control.recognizer import HandGestureRecognizer
 from gesture_control.safety_manager import SafetyManager, SafetySettings
 
 
-def landmarks(extended=(), thumb_tip=(0.50, 0.55), thumb_ip=(0.50, 0.50)):
+def landmarks(
+    extended=(),
+    thumb_tip=(0.50, 0.55),
+    thumb_ip=(0.50, 0.50),
+    down=(),
+):
     points = [P(x=0.5, y=0.6) for _ in range(21)]
     points[0] = P(x=0.5, y=0.9)
     points[2] = P(x=0.5, y=0.55)
@@ -18,12 +24,17 @@ def landmarks(extended=(), thumb_tip=(0.50, 0.55), thumb_ip=(0.50, 0.50)):
         (16, 14, 13),
         (20, 18, 17),
     ):
-        points[mcp] = P(x=0.5, y=0.55)
-        points[pip] = P(x=0.5, y=0.40)
-        points[tip] = P(
-            x=0.5,
-            y=0.35 if tip in extended else 0.45,
-        )
+        if tip in down:
+            points[mcp] = P(x=0.5, y=0.45)
+            points[pip] = P(x=0.5, y=0.60)
+            points[tip] = P(x=0.5, y=0.78)
+        else:
+            points[mcp] = P(x=0.5, y=0.55)
+            points[pip] = P(x=0.5, y=0.40)
+            points[tip] = P(
+                x=0.5,
+                y=0.35 if tip in extended else 0.45,
+            )
 
     return points
 
@@ -48,7 +59,8 @@ def test_recognizes_five_conservative_poses():
             "space",
         ),
         (landmarks(), "ctrl+s"),
-        (landmarks((8, 12)), "alt+tab"),
+        (landmarks((8, 12)), "scroll_up"),
+        (landmarks(down=(8, 12)), "scroll_down"),
     ]
 
     assert [
@@ -99,3 +111,11 @@ def test_default_safety_delay_is_one_and_a_half_seconds():
     settings = SafetySettings()
     assert settings.hold_seconds == 1.5
     assert settings.cooldown_seconds == 1.5
+
+
+def test_mouse_scroll_is_one_step_and_dry_run_by_default():
+    controller = MouseController()
+    result = controller.execute("scroll_down")
+
+    assert "1 passo" in result
+    assert "Modo de teste" in result

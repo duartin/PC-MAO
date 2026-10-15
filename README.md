@@ -11,7 +11,7 @@ Aplicação local em Python para controlar o computador por poses e movimentos d
 - Intervalo mínimo de **1,5 segundo** entre ações disparadas, inclusive deslizes.
 - Sensibilidade dos deslizes ajustável na interface ou pela linha de comando.
 - Webcam e MediaPipe rodam em uma thread de fundo para não congelar a janela.
-- Ações disponíveis: poses básicas, rolagem vertical e navegação anterior/próxima no histórico do navegador.
+- Ações disponíveis: poses básicas, rolagem por dois dedos apontados e navegação horizontal anterior/próxima no histórico do navegador.
 
 Personalização de mapeamentos/perfis e controle de cursor, clique, arraste e calibração ainda não fazem parte desta etapa; serão desenvolvidos em entregas posteriores.
 

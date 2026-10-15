@@ -1,7 +1,7 @@
 """Mouse actions with dry-run defaults and smoothed cursor mapping."""
 
 # One wheel step per repeat makes sustained scrolling smooth and controllable.
-SCROLL_TICKS = {"scroll_up": 1, "scroll_down": -1}
+SCROLL_TICKS = {"scroll_up": 80, "scroll_down": -85}
 
 
 class MouseController:

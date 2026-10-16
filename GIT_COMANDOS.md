@@ -35,7 +35,7 @@ python -m pytest -q
 git status --short
 git add -A
 git diff --cached
-git commit -m "Finaliza gestos, calibração e perfis do PC-MAO"
+git commit -m "Recupera webcam após falhas transitórias"
 git push -u origin main
 ```
 

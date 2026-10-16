@@ -1,6 +1,7 @@
 """Background webcam/gesture worker; all image processing stays on-device."""
 import threading
 import time
+import platform
 from datetime import datetime
 
 import cv2
@@ -9,6 +10,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 from .click_drag import ClickDragController
+from .camera_capture import camera_backends
 from .gesture_hysteresis import GestureHysteresis
 from .keyboard_controller import KeyboardController
 from .mode_manager import ModeManager
@@ -30,6 +32,40 @@ class CameraWorker(QThread):
 
     GESTURE_STABILITY_SECONDS = 0.25
     SCROLL_REPEAT_SECONDS = 0.18
+    CAMERA_READ_FAILURE_LIMIT = 3
+    CAMERA_RETRY_SECONDS = 1.0
+
+    @staticmethod
+    def _open_camera(camera_index):
+        """Open with a Windows-native backend first, then try OpenCV default."""
+        backends = camera_backends(
+            platform.system(),
+            getattr(cv2, "CAP_DSHOW", None),
+            cv2.CAP_ANY,
+        )
+        for backend in backends:
+            cap = None
+            try:
+                cap = cv2.VideoCapture(camera_index, backend)
+                if cap.isOpened():
+                    # Avoid building up a queue of stale frames on slower PCs.
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    return cap
+            except Exception:
+                pass
+            if cap is not None:
+                cap.release()
+        return None
+
+    def _wait_before_camera_retry(self, seconds):
+        """Wait without making Stop unresponsive."""
+        deadline = time.monotonic() + seconds
+        while not self.isInterruptionRequested():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return True
+            time.sleep(min(0.1, remaining))
+        return False
 
     def __init__(self, camera_index=0, execute=False, motion_sensitivity=1.0,
                  parent=None, profile=None):
@@ -111,12 +147,18 @@ class CameraWorker(QThread):
         )
 
     def run(self) -> None:
-        cap = cv2.VideoCapture(self.camera_index)
-        if not cap.isOpened():
-            cap.release()
+        cap = None
+        while not self.isInterruptionRequested():
+            cap = self._open_camera(self.camera_index)
+            if cap is not None:
+                break
             self.status_changed.emit(
-                f"Não foi possível abrir a câmera {self.camera_index}."
+                f"Não foi possível abrir a câmera {self.camera_index}; "
+                "tentando novamente. Verifique se outro programa está usando a webcam."
             )
+            if not self._wait_before_camera_retry(self.CAMERA_RETRY_SECONDS):
+                return
+        if cap is None:
             return
 
         self.status_changed.emit("Câmera ativa — processamento local.")
@@ -167,6 +209,7 @@ class CameraWorker(QThread):
         last_scroll_action_time = float("-inf")
         right_click_latched = False
         right_click_started_at = None
+        consecutive_read_failures = 0
 
         try:
             with hands_api.Hands(
@@ -177,12 +220,45 @@ class CameraWorker(QThread):
                 min_tracking_confidence=0.60,
             ) as hands:
                 while not self.isInterruptionRequested():
-                    ok, frame = cap.read()
+                    try:
+                        ok, frame = cap.read()
+                    except Exception as exc:
+                        ok, frame = False, None
+                        read_error = str(exc)
+                    else:
+                        read_error = ""
                     if not ok:
+                        consecutive_read_failures += 1
+                        if consecutive_read_failures < self.CAMERA_READ_FAILURE_LIMIT:
+                            time.sleep(0.05)
+                            continue
+
+                        detail = f" ({read_error})" if read_error else ""
                         self.status_changed.emit(
-                            "A câmera parou de fornecer imagens."
+                            "Sinal da câmera perdido" + detail + "; reconectando..."
                         )
-                        break
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                        cap = None
+                        while not self.isInterruptionRequested():
+                            if not self._wait_before_camera_retry(self.CAMERA_RETRY_SECONDS):
+                                break
+                            cap = self._open_camera(self.camera_index)
+                            if cap is not None:
+                                consecutive_read_failures = 0
+                                self.status_changed.emit(
+                                    "Câmera reconectada — processamento local retomado."
+                                )
+                                break
+                            self.status_changed.emit(
+                                "Webcam ainda indisponível; nova tentativa em 1 s."
+                            )
+                        if cap is None:
+                            break
+                        continue
+                    consecutive_read_failures = 0
 
                     frame = cv2.flip(frame, 1)
                     if self._is_paused():
@@ -509,5 +585,6 @@ class CameraWorker(QThread):
                 self.status_changed.emit(
                     f"Falha ao liberar o botão após arraste: {exc}"
                 )
-            cap.release()
+            if cap is not None:
+                cap.release()
             self.status_changed.emit("Câmera desligada.")

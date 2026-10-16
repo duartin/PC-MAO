@@ -15,6 +15,7 @@ Para registrar atualizações no GitHub, aplique os arquivos na pasta clonada `P
 - Assistente guiado calibra o limiar individual da pinça. A moldura no vídeo mostra a área ativa do cursor.
 - Perfis JSON armazenam parâmetros, calibração e mapeamentos seguros; podem ser criados, renomeados, importados e exportados.
 - O modo de teste é padrão. A caixa **Executar ações reais no computador** precisa ser marcada para enviar entrada real.
+- Se a webcam falhar temporariamente, o programa tolera quadros perdidos e tenta reabrir a câmera automaticamente, sem exigir reinício manual.
 
 ## Gestos
 
